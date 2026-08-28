@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FlowStock.Api/FlowStock.Api.csproj" />
+    <Project Path="src/FlowStock.Application/FlowStock.Application.csproj" />
+    <Project Path="src/FlowStock.Domain/FlowStock.Domain.csproj" />
+    <Project Path="src/FlowStock.Infrastructure/FlowStock.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FlowStock.IntegrationTests/FlowStock.IntegrationTests.csproj" />
+    <Project Path="tests/FlowStock.UnitTests/FlowStock.UnitTests.csproj" />
+  </Folder>
+</Solution>
