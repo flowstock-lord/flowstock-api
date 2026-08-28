@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 2 — done. Phase 3 (warehouses and locations) is next.**
+**Phase 3 — done. Phase 4 (inventory core) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -103,8 +103,9 @@ abstractions declared in `Application`/`Domain`.
   `INVALID_MOVEMENT`, `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`,
   `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`. Already in use:
   `USER_NOT_FOUND`, `EMAIL_ALREADY_EXISTS`, `ROLE_NOT_FOUND`, `SKU_ALREADY_EXISTS`,
-  `UNIT_OF_MEASURE_NOT_FOUND`, `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`. Add new
-  codes rather than reusing an ill-fitting one; never rename an existing code silently.
+  `UNIT_OF_MEASURE_NOT_FOUND`, `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`,
+  `WAREHOUSE_NOT_FOUND`, `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_CODE_EXISTS`.
+  Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
   return the same envelope as FluentValidation, and never leak CLR type names.
@@ -162,3 +163,15 @@ live in `appsettings.Development.json`.
   cannot be attached to a product.
 - Collections take `page`, `pageSize`, filters, and (for products) `sort`
   (`sku`, `name`, `type`, `createdAt`, `-` prefix for descending).
+
+## Warehouses and locations (Phase 3)
+
+- `Warehouse` and `StorageLocation` live in `src/FlowStock.Domain/Warehouses/`. Stock never sits
+  on a warehouse — it sits in a storage location, which belongs to exactly one warehouse and
+  never moves to another (docs/PLAN.md, section 27).
+- Master data, same rule as the catalogue: read by any authenticated user, written by `Admin`.
+- `Warehouse.Code` is unique globally; `StorageLocation.Code` is unique **within its warehouse**
+  (`A-01` may exist in several). Both are normalized upper-case and immutable after creation.
+- A deactivated warehouse accepts no new locations. Nothing is deleted, only deactivated.
+- Locations are addressed flatly by id (`/api/storage-locations`, filter with `?warehouseId=`),
+  because stock and movements will address them by id from Phase 4 on.

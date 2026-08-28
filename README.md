@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 2 (products and units of measure) — done. Next: Phase 3 — warehouses and locations.**
+**Status: Phase 3 (warehouses and locations) — done. Next: Phase 4 — inventory core.**
 
 ## Stack
 
@@ -83,10 +83,11 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Users | `/api/users` CRUD, roles, activate, deactivate | Admin |
 | Units of measure | `/api/units-of-measure` | read: any authenticated, write: Admin |
 | Products | `/api/products` | read: any authenticated, write: Admin |
+| Warehouses | `/api/warehouses` | read: any authenticated, write: Admin |
+| Storage locations | `/api/storage-locations` (filter `?warehouseId=`) | read: any authenticated, write: Admin |
 
-Collections accept `page`, `pageSize` and filters; products also accept
-`sort=sku|name|type|createdAt`, prefixed with `-` for descending. Nothing is hard-deleted —
-products, units and users are deactivated.
+Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
+(`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
 
 Tests:
 

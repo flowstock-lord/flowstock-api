@@ -2,6 +2,7 @@ using System.Reflection;
 using FlowStock.Application.Authentication;
 using FlowStock.Application.Catalog;
 using FlowStock.Application.Users;
+using FlowStock.Application.Warehouses;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,6 +18,8 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IUnitOfMeasureService, UnitOfMeasureService>();
         services.AddScoped<IProductService, ProductService>();
+        services.AddScoped<IWarehouseService, WarehouseService>();
+        services.AddScoped<IStorageLocationService, StorageLocationService>();
 
         return services;
     }

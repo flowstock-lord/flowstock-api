@@ -1,5 +1,6 @@
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Users;
+using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
 
 namespace FlowStock.Application.Common;
@@ -19,6 +20,10 @@ public interface IFlowStockDbContext
     DbSet<Product> Products { get; }
 
     DbSet<UnitOfMeasure> UnitsOfMeasure { get; }
+
+    DbSet<Warehouse> Warehouses { get; }
+
+    DbSet<StorageLocation> StorageLocations { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -2,6 +2,7 @@ using FlowStock.Application.Common;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Common;
 using FlowStock.Domain.Users;
+using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
 
 namespace FlowStock.Infrastructure.Persistence;
@@ -26,6 +27,10 @@ public class FlowStockDbContext(
     public DbSet<Product> Products => Set<Product>();
 
     public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
+
+    public DbSet<Warehouse> Warehouses => Set<Warehouse>();
+
+    public DbSet<StorageLocation> StorageLocations => Set<StorageLocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
