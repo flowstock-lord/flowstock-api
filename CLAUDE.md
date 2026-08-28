@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 4 — done. Phase 5 (BOM) is next.**
+**Phase 5 — done. Phase 6 (production orders) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -104,8 +104,8 @@ abstractions declared in `Application`/`Domain`.
   `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`, `WAREHOUSE_NOT_FOUND`,
   `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_NOT_FOUND`, `LOCATION_CODE_EXISTS`,
   `LOCATION_INACTIVE`, `MOVEMENT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `INVALID_MOVEMENT`,
-  `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`. Reserved for later phases:
-  `BOM_NOT_FOUND`, `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
+  `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`, `BOM_INVALID`.
+  Reserved for later phases: `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
   Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
@@ -204,3 +204,31 @@ live in `appsettings.Development.json`.
 - Document numbers (`MOV-000001`) come from the `StockMovementNumbers` PostgreSQL sequence.
 - Reading stock and movement history is open to any authenticated user — it is the audit trail.
   Creating, confirming and cancelling need `Policies.Warehouse` (docs/PLAN.md, section 25).
+
+## Bills of materials (Phase 5)
+
+- `BillOfMaterial` and `BillOfMaterialItem` live in `src/FlowStock.Domain/Production/`, which will
+  also hold production orders. `BillOfMaterialService` is the only thing that touches them, and it
+  never touches stock.
+- A recipe produces `OutputQuantity` of its product — the "Cookie / 100 pcs" of docs/PLAN.md,
+  section 14. This field is not in the plan's suggested field list, but section 14's own example
+  is unreadable without it: item quantities need a scale to be read against.
+- **A published version is immutable.** `PUT /api/boms/{id}` changes only `Name` and
+  `Description`; components, output quantity and version never change. A different recipe is a new
+  version, so an order built from an older one can still show what it used — the same reasoning as
+  rule 2 for confirmed movements.
+- Versions are numbered per product (`1, 2, 3...`), assigned by the service, and `(ProductId,
+  Version)` is unique. Publishing makes the new version active and stands the previous one down.
+- At most one active version per product, enforced by a **filtered unique index**
+  (`IX_BillsOfMaterial_ProductId_Active`, `WHERE "IsActive"`). Because of it, deactivating the old
+  version is saved *before* inserting the new one, inside a transaction: EF may order an insert
+  ahead of an update within one save, which would trip the index on the intermediate state.
+- Item units are copied from the component product, exactly as on a stock movement line.
+- A component may appear once per recipe, and a product can never be a component of itself.
+  Both raise `BOM_INVALID`. Multi-level explosion (a component that has its own recipe) is not
+  Phase 5 — requirement calculation is single-level.
+- `GET /api/boms/{id}/requirements?quantity=N` scales the recipe: `item.Quantity * N /
+  OutputQuantity`, rounded to 4 decimals (the storage scale) away from zero. It is a pure
+  calculation — it does not look at stock. Checking availability belongs to Phase 6.
+- Reads are open to any authenticated user; writes need `Policies.Production`
+  (docs/PLAN.md, section 25).

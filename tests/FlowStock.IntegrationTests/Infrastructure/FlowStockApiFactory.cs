@@ -23,6 +23,8 @@ public class FlowStockApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
     public const string AdminPassword = "Admin123!";
     public const string WarehouseManagerEmail = "warehouse.manager@flowstock.local";
     public const string WarehouseManagerPassword = "Warehouse123!";
+    public const string ProductionManagerEmail = "production.manager@flowstock.local";
+    public const string ProductionManagerPassword = "Production123!";
     public const string ViewerEmail = "viewer@flowstock.local";
     public const string ViewerPassword = "Viewer123!";
 

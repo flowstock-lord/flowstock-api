@@ -2,6 +2,7 @@ using FlowStock.Application.Common;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Common;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Production;
 using FlowStock.Domain.Users;
 using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +46,10 @@ public class FlowStockDbContext(
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
 
     public DbSet<StockMovementLine> StockMovementLines => Set<StockMovementLine>();
+
+    public DbSet<BillOfMaterial> BillsOfMaterial => Set<BillOfMaterial>();
+
+    public DbSet<BillOfMaterialItem> BillOfMaterialItems => Set<BillOfMaterialItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

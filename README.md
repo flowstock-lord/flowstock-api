@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 4 (inventory core) — done. Next: Phase 5 — bills of materials.**
+**Status: Phase 5 (bills of materials) — done. Next: Phase 6 — production orders.**
 
 ## Stack
 
@@ -87,6 +87,7 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Storage locations | `/api/storage-locations` (filter `?warehouseId=`) | read: any authenticated, write: Admin |
 | Stock | `/api/stock`, `/api/stock/{productId}`, `/api/stock/by-location/{locationId}` | any authenticated (read-only) |
 | Stock movements | `/api/stock-movements`, `/{id}/confirm`, `/{id}/cancel` | read: any authenticated, write: Admin or WarehouseManager |
+| Bills of materials | `/api/boms`, `/{id}/requirements?quantity=`, `/{id}/activate`, `/{id}/deactivate` | read: any authenticated, write: Admin or ProductionManager |
 
 Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
 (`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
@@ -94,6 +95,9 @@ Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Sw
 Stock is never written directly. A movement is created as a `Draft`, and confirming it applies
 the whole document to stock in one transaction; only `Confirmed` movements affect balances, and
 a confirmed movement is corrected by a compensating one rather than edited.
+
+A bill of materials is versioned and immutable: publishing a new one supersedes the previous
+version rather than editing it, and every version can still be asked what a run would require.
 
 Tests:
 

@@ -1,5 +1,6 @@
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Production;
 using FlowStock.Domain.Users;
 using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +32,10 @@ public interface IFlowStockDbContext
     DbSet<StockMovement> StockMovements { get; }
 
     DbSet<StockMovementLine> StockMovementLines { get; }
+
+    DbSet<BillOfMaterial> BillsOfMaterial { get; }
+
+    DbSet<BillOfMaterialItem> BillOfMaterialItems { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
