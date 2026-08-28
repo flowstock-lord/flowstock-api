@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 1 (authentication and users) — done. Next: Phase 2 — products and units of measure.**
+**Status: Phase 2 (products and units of measure) — done. Next: Phase 3 — warehouses and locations.**
 
 ## Stack
 
@@ -74,6 +74,19 @@ Development seed users (local only, from `appsettings.Development.json`):
 | viewer@flowstock.local | Viewer123! | Viewer |
 
 Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authorize** button.
+
+## API surface so far
+
+| Area | Endpoints | Who |
+| --- | --- | --- |
+| Auth | `POST /api/auth/login`, `GET /api/auth/me` | anonymous / any authenticated |
+| Users | `/api/users` CRUD, roles, activate, deactivate | Admin |
+| Units of measure | `/api/units-of-measure` | read: any authenticated, write: Admin |
+| Products | `/api/products` | read: any authenticated, write: Admin |
+
+Collections accept `page`, `pageSize` and filters; products also accept
+`sort=sku|name|type|createdAt`, prefixed with `-` for descending. Nothing is hard-deleted —
+products, units and users are deactivated.
 
 Tests:
 

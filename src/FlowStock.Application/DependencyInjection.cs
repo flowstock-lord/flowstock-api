@@ -1,5 +1,6 @@
 using System.Reflection;
 using FlowStock.Application.Authentication;
+using FlowStock.Application.Catalog;
 using FlowStock.Application.Users;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +15,8 @@ public static class DependencyInjection
 
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IUnitOfMeasureService, UnitOfMeasureService>();
+        services.AddScoped<IProductService, ProductService>();
 
         return services;
     }

@@ -1,3 +1,4 @@
+using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Users;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,10 @@ public interface IFlowStockDbContext
     DbSet<Role> Roles { get; }
 
     DbSet<UserRole> UserRoles { get; }
+
+    DbSet<Product> Products { get; }
+
+    DbSet<UnitOfMeasure> UnitsOfMeasure { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

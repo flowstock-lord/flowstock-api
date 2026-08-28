@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 1 — done. Phase 2 (products and units of measure) is next.**
+**Phase 2 — done. Phase 3 (warehouses and locations) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -101,8 +101,13 @@ abstractions declared in `Application`/`Domain`.
 
 - Stable domain error codes: `PRODUCT_NOT_FOUND`, `LOCATION_NOT_FOUND`, `INSUFFICIENT_STOCK`,
   `INVALID_MOVEMENT`, `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`,
-  `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`. Add new codes
-  rather than reusing an ill-fitting one; never rename an existing code silently.
+  `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`. Already in use:
+  `USER_NOT_FOUND`, `EMAIL_ALREADY_EXISTS`, `ROLE_NOT_FOUND`, `SKU_ALREADY_EXISTS`,
+  `UNIT_OF_MEASURE_NOT_FOUND`, `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`. Add new
+  codes rather than reusing an ill-fitting one; never rename an existing code silently.
+- Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
+- Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
+  return the same envelope as FluentValidation, and never leak CLR type names.
 - Swagger/OpenAPI stays accurate.
 - Authorization is enforced on the backend (`Admin`, `WarehouseManager`, `ProductionManager`,
   `Viewer`), never assumed from the client.
@@ -143,3 +148,17 @@ live in `appsettings.Development.json`.
   middleware maps to 400.
 - Request DTOs are validated by `ValidationFilter`; adding an `AbstractValidator<T>` is enough,
   registration is automatic.
+
+## Catalog (Phase 2)
+
+- `Product` and `UnitOfMeasure` live in `src/FlowStock.Domain/Catalog/`. A product is bound to
+  exactly one unit; quantities are never mixed across units.
+- Master data is read by any authenticated user and written by `Admin` only — section 25 of the
+  plan gives full access to `Admin` alone, and the catalogue is not a warehouse operation.
+- `Sku` is normalized upper-case and unique; `UnitOfMeasure.Code` is normalized lower-case and
+  unique. Both are immutable after creation — inventory history refers to them.
+- `ProductType` is persisted by name, so reordering the enum can never reinterpret existing rows.
+- Nothing in the catalogue is ever deleted: products and units are deactivated. An inactive unit
+  cannot be attached to a product.
+- Collections take `page`, `pageSize`, filters, and (for products) `sort`
+  (`sku`, `name`, `type`, `createdAt`, `-` prefix for descending).

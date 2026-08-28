@@ -1,4 +1,5 @@
 using FlowStock.Application.Common;
+using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Common;
 using FlowStock.Domain.Users;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,10 @@ public class FlowStockDbContext(
     public DbSet<Role> Roles => Set<Role>();
 
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+
+    public DbSet<Product> Products => Set<Product>();
+
+    public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

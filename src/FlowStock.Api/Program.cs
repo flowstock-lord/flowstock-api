@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using FlowStock.Api;
 using FlowStock.Api.Authorization;
 using FlowStock.Api.Middleware;
@@ -29,7 +30,14 @@ try
         .ReadFrom.Services(services)
         .Enrich.FromLogContext());
 
-    builder.Services.AddControllers(options => options.Filters.Add<ValidationFilter>());
+    builder.Services
+        .AddControllers(options => options.Filters.Add<ValidationFilter>())
+        // Enums travel as their names, so the wire contract stays readable and stable
+        // even if an enum is ever reordered.
+        .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
+        .ConfigureApiBehaviorOptions(options =>
+            options.InvalidModelStateResponseFactory = ModelBindingErrors.ToErrorResponse);
+
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<ICurrentUser, CurrentUser>();
     builder.Services.AddEndpointsApiExplorer();
