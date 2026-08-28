@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 6 — done. Phase 7 (traceability) is next.**
+**Phase 7 — done. Phase 8 (batch / lot tracking) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -264,3 +264,27 @@ live in `appsettings.Development.json`.
 - Order numbers (`PRD-000001`) come from the `ProductionOrderNumbers` PostgreSQL sequence.
 - Reading orders is open to any authenticated user — production history is part of the audit
   trail. Running one needs `Policies.Production` (docs/PLAN.md, section 25).
+
+## Traceability (Phase 7)
+
+- `TraceabilityService` lives in `src/FlowStock.Application/Traceability/` and owns no entities and
+  no schema: Phase 7 adds no table and no migration. Everything it answers is derived from
+  confirmed movements and production orders, which is exactly the rule that reports may never
+  become another way to change stock.
+- Three questions, three endpoints under `/api/traceability`, all `Policies.AnyAuthenticated`:
+  `products/{id}/history` (where a product came from and went, in or out, who and when),
+  `products/{id}/usage` (forward: which runs consumed a material and what they produced), and
+  `production-orders/{id}` (backward: what a run was made of).
+- **Only confirmed movements are history.** A draft has not happened and a cancelled one never
+  did, so neither appears.
+- The person is resolved to a name and email, not left as an id — "who moved this material" is one
+  of the questions the module exists to answer. A movement is attributed to whoever confirmed it,
+  because confirmation is the act that changed stock.
+- `MaterialSource` lists the movements that *could* have supplied a consumed material — the
+  confirmed inbound documents into the production location up to the moment of consumption, newest
+  first. Without batches (Phase 8) stock in a location is fungible, so naming the exact kilograms
+  is not something the data supports; section 19 asks for source movements "where batch tracking is
+  implemented", and this is the honest answer until then.
+- `StockFlow` is a presentation concept, not a domain rule, so it lives in the Application layer:
+  asked about a product it reads In / Out / Transfer, asked about a location it reads relative to
+  that location.

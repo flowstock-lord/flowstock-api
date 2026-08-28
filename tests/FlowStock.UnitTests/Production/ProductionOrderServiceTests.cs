@@ -26,7 +26,7 @@ public class ProductionOrderServiceTests
         _orders = new ProductionOrderService(
             _fixture.Db,
             _fixture.Movements,
-            new TestCurrentUser(_fixture.UserId),
+            _fixture.CurrentUser,
             TimeProvider.System,
             NullLogger<ProductionOrderService>.Instance);
     }
@@ -331,10 +331,5 @@ public class ProductionOrderServiceTests
         var exception = await Assert.ThrowsAsync<ProductionOrderInvalidException>(() => OrderAsync(0.0001m));
 
         Assert.Equal("PRODUCTION_ORDER_INVALID", exception.Code);
-    }
-
-    private sealed class TestCurrentUser(Guid userId) : ICurrentUser
-    {
-        public Guid? UserId => userId;
     }
 }

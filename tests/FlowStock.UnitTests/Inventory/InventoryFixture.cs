@@ -75,8 +75,11 @@ public class InventoryFixture
 
     public Guid UserId { get; } = Guid.NewGuid();
 
+    /// <summary>The person behind every operation in a test, as the API's auth would supply one.</summary>
+    public ICurrentUser CurrentUser => new TestCurrentUser(UserId);
+
     public StockMovementService Movements => new(
-        Db, new TestCurrentUser(UserId), TimeProvider.System, NullLogger<StockMovementService>.Instance);
+        Db, CurrentUser, TimeProvider.System, NullLogger<StockMovementService>.Instance);
 
     public StockService StockReader => new(Db);
 
@@ -89,7 +92,8 @@ public class InventoryFixture
             .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        return new FlowStockDbContext(options);
+        // The context is given the current user so audit stamps land the way they do in the API.
+        return new FlowStockDbContext(options, CurrentUser);
     }
 
     /// <summary>Reads a balance from a fresh context, so it reflects saved state only.</summary>

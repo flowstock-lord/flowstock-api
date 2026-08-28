@@ -3,6 +3,7 @@ using FlowStock.Application.Authentication;
 using FlowStock.Application.Catalog;
 using FlowStock.Application.Inventory;
 using FlowStock.Application.Production;
+using FlowStock.Application.Traceability;
 using FlowStock.Application.Users;
 using FlowStock.Application.Warehouses;
 using FluentValidation;
@@ -26,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<IStockMovementService, StockMovementService>();
         services.AddScoped<IBillOfMaterialService, BillOfMaterialService>();
         services.AddScoped<IProductionOrderService, ProductionOrderService>();
+        services.AddScoped<ITraceabilityService, TraceabilityService>();
 
         return services;
     }
