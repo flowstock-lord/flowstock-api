@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 3 — done. Phase 4 (inventory core) is next.**
+**Phase 4 — done. Phase 5 (BOM) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -99,17 +99,19 @@ abstractions declared in `Application`/`Domain`.
   }
   ```
 
-- Stable domain error codes: `PRODUCT_NOT_FOUND`, `LOCATION_NOT_FOUND`, `INSUFFICIENT_STOCK`,
-  `INVALID_MOVEMENT`, `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`,
-  `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`. Already in use:
-  `USER_NOT_FOUND`, `EMAIL_ALREADY_EXISTS`, `ROLE_NOT_FOUND`, `SKU_ALREADY_EXISTS`,
-  `UNIT_OF_MEASURE_NOT_FOUND`, `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`,
-  `WAREHOUSE_NOT_FOUND`, `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_CODE_EXISTS`.
+- Stable domain error codes in use: `USER_NOT_FOUND`, `EMAIL_ALREADY_EXISTS`, `ROLE_NOT_FOUND`,
+  `PRODUCT_NOT_FOUND`, `SKU_ALREADY_EXISTS`, `UNIT_OF_MEASURE_NOT_FOUND`,
+  `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`, `WAREHOUSE_NOT_FOUND`,
+  `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_NOT_FOUND`, `LOCATION_CODE_EXISTS`,
+  `LOCATION_INACTIVE`, `MOVEMENT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `INVALID_MOVEMENT`,
+  `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`. Reserved for later phases:
+  `BOM_NOT_FOUND`, `BOM_INVALID`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
   Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
   return the same envelope as FluentValidation, and never leak CLR type names.
-- Swagger/OpenAPI stays accurate.
+- Swagger/OpenAPI stays accurate. `decimal` is mapped explicitly to `format: decimal`, because
+  Swashbuckle's default (`double`) would tell clients to use the one type quantities must not use.
 - Authorization is enforced on the backend (`Admin`, `WarehouseManager`, `ProductionManager`,
   `Viewer`), never assumed from the client.
 
@@ -175,3 +177,30 @@ live in `appsettings.Development.json`.
 - A deactivated warehouse accepts no new locations. Nothing is deleted, only deactivated.
 - Locations are addressed flatly by id (`/api/storage-locations`, filter with `?warehouseId=`),
   because stock and movements will address them by id from Phase 4 on.
+
+## Inventory core (Phase 4)
+
+- `Stock`, `StockMovement` and `StockMovementLine` live in `src/FlowStock.Domain/Inventory/`.
+  All the writing happens in `StockMovementService`; `StockService` only reads.
+- A balance (`Stock`) is a **derived** value — one row per (product, location), created on demand
+  by the first movement that touches it. It is never the source of truth and is never written
+  from anywhere but `StockMovementService.ConfirmAsync`.
+- A movement is a document plus lines. Line quantities are always positive; direction comes from
+  the document's endpoints. `Receipt` has only a destination, `Transfer` has both (and they must
+  differ), `Adjustment` has exactly one — destination for a surplus, source for a shortage, and
+  it must state a reason. `Consumption`, `ProductionOutput` and `WriteOff` exist in the enum but
+  are rejected by the create validator until the phase that owns them.
+- Status flow is `Draft → Confirmed` or `Draft → Cancelled`, nothing else. There is no update and
+  no delete endpoint: a confirmed movement is corrected by a compensating movement.
+- **Confirmation is the transaction.** `IFlowStockDbContext.BeginTransactionAsync` wraps it, and
+  `LockStockAsync` loads every balance the document touches with `SELECT ... FOR UPDATE` in a
+  fixed order, so a competing confirmation waits and then reads the updated quantity. Missing
+  balances are inserted with `ON CONFLICT DO NOTHING` and re-locked. The lock is what makes the
+  guarantee; `StockLockingTests` proves it by holding a balance and timing the second reader.
+- Postgres check constraints (`Quantity >= 0`, `ReservedQuantity <= Quantity`, line
+  `Quantity > 0`) are the last line of defence behind the application rule, not a substitute.
+- `ReservedQuantity` is on `Stock` and always zero for now; reservations arrive with production
+  orders. `AvailableQuantity = Quantity - ReservedQuantity` is computed, never a column.
+- Document numbers (`MOV-000001`) come from the `StockMovementNumbers` PostgreSQL sequence.
+- Reading stock and movement history is open to any authenticated user — it is the audit trail.
+  Creating, confirming and cancelling need `Policies.Warehouse` (docs/PLAN.md, section 25).

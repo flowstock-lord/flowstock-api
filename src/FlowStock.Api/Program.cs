@@ -45,6 +45,14 @@ try
     {
         options.SwaggerDoc("v1", new() { Title = "FlowStock API", Version = "v1" });
 
+        // Quantities are decimal. Swashbuckle would otherwise document them as "double", telling
+        // clients to use exactly the type inventory quantities must never touch.
+        options.MapType<decimal>(() => new OpenApiSchema { Type = JsonSchemaType.Number, Format = "decimal" });
+        options.MapType<decimal?>(() => new OpenApiSchema
+        {
+            Type = JsonSchemaType.Number | JsonSchemaType.Null, Format = "decimal"
+        });
+
         options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
         {
             Name = "Authorization",

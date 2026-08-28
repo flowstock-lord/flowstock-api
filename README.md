@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 3 (warehouses and locations) — done. Next: Phase 4 — inventory core.**
+**Status: Phase 4 (inventory core) — done. Next: Phase 5 — bills of materials.**
 
 ## Stack
 
@@ -85,9 +85,15 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Products | `/api/products` | read: any authenticated, write: Admin |
 | Warehouses | `/api/warehouses` | read: any authenticated, write: Admin |
 | Storage locations | `/api/storage-locations` (filter `?warehouseId=`) | read: any authenticated, write: Admin |
+| Stock | `/api/stock`, `/api/stock/{productId}`, `/api/stock/by-location/{locationId}` | any authenticated (read-only) |
+| Stock movements | `/api/stock-movements`, `/{id}/confirm`, `/{id}/cancel` | read: any authenticated, write: Admin or WarehouseManager |
 
 Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
 (`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
+
+Stock is never written directly. A movement is created as a `Draft`, and confirming it applies
+the whole document to stock in one transaction; only `Confirmed` movements affect balances, and
+a confirmed movement is corrected by a compensating one rather than edited.
 
 Tests:
 
