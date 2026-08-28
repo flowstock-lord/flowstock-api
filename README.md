@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 0 (project foundation) — done. Next: Phase 1 — authentication and users.**
+**Status: Phase 1 (authentication and users) — done. Next: Phase 2 — products and units of measure.**
 
 ## Stack
 
@@ -64,15 +64,30 @@ Run everything, API included, in containers:
 docker compose -f docker/docker-compose.yml --profile full up -d --build
 ```
 
+Development seed users (local only, from `appsettings.Development.json`):
+
+| Email | Password | Role |
+| --- | --- | --- |
+| admin@flowstock.local | Admin123! | Admin |
+| warehouse.manager@flowstock.local | Warehouse123! | WarehouseManager |
+| production.manager@flowstock.local | Production123! | ProductionManager |
+| viewer@flowstock.local | Viewer123! | Viewer |
+
+Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authorize** button.
+
 Tests:
 
 ```bash
 dotnet test FlowStock.slnx
 ```
 
+Integration tests start their own PostgreSQL container via Testcontainers, so Docker must be
+running.
+
 Configuration: the connection string comes from `ConnectionStrings:FlowStockDb`
 (env var `ConnectionStrings__FlowStockDb`); `Database:MigrateOnStartup` controls whether
-migrations run at startup. Development defaults are in `appsettings.Development.json` and are
+migrations run at startup; `Jwt:Key` must be supplied per environment (`Jwt__Key`) and is
+deliberately empty in `appsettings.json`. Development defaults are in `appsettings.Development.json` and are
 for local use only.
 
 ## Documentation

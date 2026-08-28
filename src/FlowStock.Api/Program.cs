@@ -1,10 +1,19 @@
+using System.Text;
+using FlowStock.Api;
+using FlowStock.Api.Authorization;
 using FlowStock.Api.Middleware;
 using FlowStock.Application;
+using FlowStock.Application.Common;
 using FlowStock.Infrastructure;
+using FlowStock.Infrastructure.Identity;
 using FlowStock.Infrastructure.Persistence;
-using HealthChecks.NpgSql;
+using FlowStock.Infrastructure.Seed;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -20,15 +29,54 @@ try
         .ReadFrom.Services(services)
         .Enrich.FromLogContext());
 
-    builder.Services.AddControllers();
+    builder.Services.AddControllers(options => options.Filters.Add<ValidationFilter>());
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<ICurrentUser, CurrentUser>();
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(options =>
     {
         options.SwaggerDoc("v1", new() { Title = "FlowStock API", Version = "v1" });
+
+        options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Paste the token returned by /api/auth/login."
+        });
+
+        options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+        {
+            { new OpenApiSecuritySchemeReference("Bearer", document), new List<string>() }
+        });
     });
 
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
+
+    var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = jwtOptions.Issuer,
+                ValidAudience = jwtOptions.Audience,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
+                    string.IsNullOrEmpty(jwtOptions.Key) ? new string('x', 32) : jwtOptions.Key)),
+                ClockSkew = TimeSpan.Zero
+            };
+        });
+
+    builder.Services.AddAuthorizationBuilder().AddFlowStockPolicies();
 
     builder.Services.AddHealthChecks()
         .AddNpgSql(
@@ -50,6 +98,7 @@ try
     }
 
     // TLS is terminated at the edge (reverse proxy / ingress), so no HTTPS redirect here.
+    app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
 
@@ -63,6 +112,18 @@ try
         using var scope = app.Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<FlowStockDbContext>().Database.MigrateAsync();
         Log.Information("Database migrations applied on startup");
+    }
+
+    // Seed users only in Development — seed credentials must never exist in production.
+    if (app.Environment.IsDevelopment())
+    {
+        using var scope = app.Services.CreateScope();
+        var seedOptions = scope.ServiceProvider.GetRequiredService<IOptions<SeedOptions>>().Value;
+
+        if (seedOptions.Users.Count > 0)
+        {
+            await scope.ServiceProvider.GetRequiredService<DatabaseSeeder>().SeedAsync(seedOptions.Users);
+        }
     }
 
     await app.RunAsync();

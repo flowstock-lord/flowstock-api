@@ -18,4 +18,6 @@ public static class ErrorCodes
 {
     public const string ValidationFailed = "VALIDATION_FAILED";
     public const string InternalError = "INTERNAL_ERROR";
+    public const string InvalidCredentials = "INVALID_CREDENTIALS";
+    public const string UserInactive = "USER_INACTIVE";
 }

@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 0 — done. Phase 1 (authentication and users) is next.**
+**Phase 1 — done. Phase 2 (products and units of measure) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -127,4 +127,19 @@ dotnet ef database update -p src/FlowStock.Infrastructure -s src/FlowStock.Api
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Seed data and seed credentials are for local development only.
+Seed data and seed credentials are for local development only. `Jwt:Key` is empty in
+`appsettings.json` on purpose — never commit a signing key; supply it per environment
+(`Jwt__Key`). Development seeds four users (`admin@flowstock.local` and friends) whose passwords
+live in `appsettings.Development.json`.
+
+## Authentication (Phase 1)
+
+- `POST /api/auth/login` → JWT; `GET /api/auth/me` → the caller. Access tokens only, no refresh.
+- Roles live in the `Roles` table and are named by `RoleNames` in
+  `src/FlowStock.Domain/Users/Role.cs` — never hardcode the strings.
+- Protect endpoints with the policies in `src/FlowStock.Api/Authorization/Policies.cs`
+  (`Admin`, `Warehouse`, `Production`, `AnyAuthenticated`), not with raw role strings.
+- Login failures return 401 from the controller; they are not `DomainException`s, which the
+  middleware maps to 400.
+- Request DTOs are validated by `ValidationFilter`; adding an `AbstractValidator<T>` is enough,
+  registration is automatic.
