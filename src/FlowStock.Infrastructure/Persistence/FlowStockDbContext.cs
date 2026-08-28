@@ -22,8 +22,12 @@ public class FlowStockDbContext(
 {
     public const string MovementNumberSequence = "StockMovementNumbers";
 
+    public const string ProductionOrderNumberSequence = "ProductionOrderNumbers";
+
     /// <summary>Backs the document numbers of the non-PostgreSQL (unit test) provider only.</summary>
     private static long _fallbackMovementNumber;
+
+    private static long _fallbackProductionOrderNumber;
 
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
@@ -51,6 +55,10 @@ public class FlowStockDbContext(
 
     public DbSet<BillOfMaterialItem> BillOfMaterialItems => Set<BillOfMaterialItem>();
 
+    public DbSet<ProductionOrder> ProductionOrders => Set<ProductionOrder>();
+
+    public DbSet<ProductionOrderMaterial> ProductionOrderMaterials => Set<ProductionOrderMaterial>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -58,6 +66,7 @@ public class FlowStockDbContext(
         // Document numbers come from a sequence rather than a counted query: a sequence hands out
         // distinct values to concurrent callers and does not give them back on rollback.
         modelBuilder.HasSequence<long>(MovementNumberSequence).StartsAt(1).IncrementsBy(1);
+        modelBuilder.HasSequence<long>(ProductionOrderNumberSequence).StartsAt(1).IncrementsBy(1);
 
         // Entity configurations live next to this context and are picked up automatically.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(FlowStockDbContext).Assembly);
@@ -76,7 +85,17 @@ public class FlowStockDbContext(
     }
 
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
-        => new UnitOfWorkTransaction(await Database.BeginTransactionAsync(cancellationToken));
+    {
+        // A production order posts its stock movements through the inventory service, which opens
+        // a transaction of its own because on its own it must. Joining the open one keeps the whole
+        // operation a single unit of work instead of failing on a nested BEGIN.
+        if (Database.CurrentTransaction is not null)
+        {
+            return new JoinedTransaction();
+        }
+
+        return new UnitOfWorkTransaction(await Database.BeginTransactionAsync(cancellationToken));
+    }
 
     public async Task<IReadOnlyList<Stock>> LockStockAsync(
         IReadOnlyCollection<StockKey> keys,
@@ -132,6 +151,18 @@ public class FlowStockDbContext(
 
         return await Database
             .SqlQueryRaw<long>(NextMovementNumberSql)
+            .SingleAsync(cancellationToken);
+    }
+
+    public async Task<long> NextProductionOrderNumberAsync(CancellationToken cancellationToken)
+    {
+        if (!Database.IsNpgsql())
+        {
+            return Interlocked.Increment(ref _fallbackProductionOrderNumber);
+        }
+
+        return await Database
+            .SqlQueryRaw<long>(NextProductionOrderNumberSql)
             .SingleAsync(cancellationToken);
     }
 
@@ -214,6 +245,9 @@ public class FlowStockDbContext(
     private const string NextMovementNumberSql =
         $"""SELECT nextval('"{MovementNumberSequence}"') AS "Value" """;
 
+    private const string NextProductionOrderNumberSql =
+        $"""SELECT nextval('"{ProductionOrderNumberSequence}"') AS "Value" """;
+
     /// <summary>Rolls back unless committed, so a failed inventory operation leaves nothing behind.</summary>
     private sealed class UnitOfWorkTransaction(IDbContextTransaction transaction) : IUnitOfWorkTransaction
     {
@@ -221,5 +255,16 @@ public class FlowStockDbContext(
             => transaction.CommitAsync(cancellationToken);
 
         public ValueTask DisposeAsync() => transaction.DisposeAsync();
+    }
+
+    /// <summary>
+    /// A handle on a transaction someone else opened. It neither commits nor rolls back: the
+    /// outermost operation decides the fate of the whole unit of work.
+    /// </summary>
+    private sealed class JoinedTransaction : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

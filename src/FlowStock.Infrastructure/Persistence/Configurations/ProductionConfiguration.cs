@@ -1,3 +1,4 @@
+using FlowStock.Domain.Inventory;
 using FlowStock.Domain.Production;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -65,6 +66,99 @@ public class BillOfMaterialItemConfiguration : IEntityTypeConfiguration<BillOfMa
         builder.HasOne(i => i.UnitOfMeasure)
             .WithMany()
             .HasForeignKey(i => i.UnitOfMeasureId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class ProductionOrderConfiguration : IEntityTypeConfiguration<ProductionOrder>
+{
+    public void Configure(EntityTypeBuilder<ProductionOrder> builder)
+    {
+        builder.ToTable("ProductionOrders", table =>
+        {
+            table.HasCheckConstraint("CK_ProductionOrders_PlannedQuantity_Positive", "\"PlannedQuantity\" > 0");
+            table.HasCheckConstraint("CK_ProductionOrders_ProducedQuantity_NonNegative", "\"ProducedQuantity\" >= 0");
+        });
+
+        builder.HasKey(o => o.Id);
+
+        builder.Property(o => o.Number).IsRequired().HasMaxLength(30);
+        builder.HasIndex(o => o.Number).IsUnique();
+
+        builder.Property(o => o.PlannedQuantity).IsRequired().HasPrecision(18, 4);
+        builder.Property(o => o.ProducedQuantity).IsRequired().HasPrecision(18, 4);
+
+        // Stored by name, so reordering the enum can never reinterpret an existing order.
+        builder.Property(o => o.Status).IsRequired().HasConversion<string>().HasMaxLength(20);
+        builder.HasIndex(o => o.Status);
+
+        builder.Property(o => o.Notes).HasMaxLength(1000);
+        builder.Property(o => o.CreatedAt).IsRequired();
+
+        builder.HasOne(o => o.Product)
+            .WithMany()
+            .HasForeignKey(o => o.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // The recipe version an order was built from must stay readable for as long as the order does.
+        builder.HasOne(o => o.BillOfMaterial)
+            .WithMany()
+            .HasForeignKey(o => o.BillOfMaterialId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(o => o.ProductionLocation)
+            .WithMany()
+            .HasForeignKey(o => o.ProductionLocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(o => o.OutputLocation)
+            .WithMany()
+            .HasForeignKey(o => o.OutputLocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // The movements an order posted point back at it. Declared from this side because the
+        // inventory module knows nothing about production beyond the foreign key itself.
+        builder.HasMany<StockMovement>()
+            .WithOne()
+            .HasForeignKey(m => m.ProductionOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class ProductionOrderMaterialConfiguration : IEntityTypeConfiguration<ProductionOrderMaterial>
+{
+    public void Configure(EntityTypeBuilder<ProductionOrderMaterial> builder)
+    {
+        builder.ToTable("ProductionOrderMaterials", table =>
+        {
+            table.HasCheckConstraint("CK_ProductionOrderMaterials_RequiredQuantity_Positive",
+                "\"RequiredQuantity\" > 0");
+            table.HasCheckConstraint("CK_ProductionOrderMaterials_ConsumedQuantity_NonNegative",
+                "\"ConsumedQuantity\" >= 0");
+        });
+
+        builder.HasKey(m => m.Id);
+
+        builder.Property(m => m.RequiredQuantity).IsRequired().HasPrecision(18, 4);
+        builder.Property(m => m.ConsumedQuantity).IsRequired().HasPrecision(18, 4);
+
+        // A material appears once per order; its quantity is a single number.
+        builder.HasIndex(m => new { m.ProductionOrderId, m.ComponentProductId }).IsUnique();
+
+        // A material line has no life of its own outside its order.
+        builder.HasOne(m => m.ProductionOrder)
+            .WithMany(o => o.Materials)
+            .HasForeignKey(m => m.ProductionOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(m => m.ComponentProduct)
+            .WithMany()
+            .HasForeignKey(m => m.ComponentProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(m => m.UnitOfMeasure)
+            .WithMany()
+            .HasForeignKey(m => m.UnitOfMeasureId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

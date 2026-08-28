@@ -37,11 +37,19 @@ public interface IFlowStockDbContext
 
     DbSet<BillOfMaterialItem> BillOfMaterialItems { get; }
 
+    DbSet<ProductionOrder> ProductionOrders { get; }
+
+    DbSet<ProductionOrderMaterial> ProductionOrderMaterials { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Starts a database transaction so a whole inventory operation succeeds or rolls back
     /// together (docs/PLAN.md, section 3.5).
+    ///
+    /// If a transaction is already open, the returned handle joins it instead of starting a
+    /// second one: a production order posts its movements inside its own transaction, and the
+    /// whole operation must still commit or roll back as one unit.
     /// </summary>
     Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 
@@ -61,9 +69,16 @@ public interface IFlowStockDbContext
     /// stay unique and ascending even when several users create movements at once.
     /// </summary>
     Task<long> NextMovementNumberAsync(CancellationToken cancellationToken);
+
+    /// <summary>The next production order number, from its own database sequence.</summary>
+    Task<long> NextProductionOrderNumberAsync(CancellationToken cancellationToken);
 }
 
-/// <summary>A database transaction spanning several SaveChanges calls. Rolls back unless committed.</summary>
+/// <summary>
+/// A database transaction spanning several SaveChanges calls. Rolls back unless committed.
+/// A handle that joined an already-open transaction commits nothing of its own — the operation
+/// that opened the transaction owns it.
+/// </summary>
 public interface IUnitOfWorkTransaction : IAsyncDisposable
 {
     Task CommitAsync(CancellationToken cancellationToken = default);

@@ -33,6 +33,14 @@ public class StockMovement : IAuditable
 
     public string? Reason { get; set; }
 
+    /// <summary>
+    /// The production order that posted this movement, for consumption and output documents
+    /// (docs/PLAN.md, section 19). Null for every movement a warehouse user posts by hand. It is
+    /// what makes traceability work in both directions: from a material to the runs that used it,
+    /// and from a finished product back to what went into it.
+    /// </summary>
+    public Guid? ProductionOrderId { get; set; }
+
     public DateTime? ConfirmedAt { get; set; }
 
     public Guid? ConfirmedBy { get; set; }
@@ -74,6 +82,18 @@ public class StockMovement : IAuditable
                 throw new InvalidMovementException(
                     "An adjustment corrects exactly one location: give a destination for a surplus " +
                     "or a source for a shortage.");
+
+            // Materials leave the system into the run; the goods the run yields come out of it.
+            case MovementType.Consumption or MovementType.WriteOff when sourceLocationId is null:
+                throw new InvalidMovementException($"A {type} requires a source location.");
+            case MovementType.Consumption or MovementType.WriteOff when destinationLocationId is not null:
+                throw new InvalidMovementException($"A {type} removes stock and has no destination location.");
+
+            case MovementType.ProductionOutput when destinationLocationId is null:
+                throw new InvalidMovementException("A production output requires a destination location.");
+            case MovementType.ProductionOutput when sourceLocationId is not null:
+                throw new InvalidMovementException(
+                    "A production output is created by the run and has no source location.");
         }
     }
 }

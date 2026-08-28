@@ -65,6 +65,11 @@ public class StockMovementConfiguration : IEntityTypeConfiguration<StockMovement
         builder.HasIndex(m => m.Status);
         builder.HasIndex(m => m.CreatedAt);
 
+        // Traceability reads both ways from here: which movements a run posted, and which runs a
+        // material ended up in (docs/PLAN.md, section 19). The relationship itself is configured
+        // from the production side, which is the module that knows about orders.
+        builder.HasIndex(m => m.ProductionOrderId);
+
         // Locations are immutable history once a movement is confirmed, so they are never deleted.
         builder.HasOne(m => m.SourceLocation)
             .WithMany()

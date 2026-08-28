@@ -21,6 +21,8 @@ public record StockMovementResponse(
     string Number,
     MovementType MovementType,
     MovementStatus Status,
+    // The production order that posted this movement, if any (docs/PLAN.md, section 19).
+    Guid? ProductionOrderId,
     Guid? SourceLocationId,
     string? SourceLocationCode,
     Guid? DestinationLocationId,
@@ -65,6 +67,9 @@ public class StockMovementQuery : PagedQuery
 
     /// <summary>Movements touching this location on either end.</summary>
     public Guid? LocationId { get; set; }
+
+    /// <summary>Movements a given production run posted — its consumption and its output.</summary>
+    public Guid? ProductionOrderId { get; set; }
 
     /// <summary>Inclusive lower bound on CreatedAt, UTC.</summary>
     public DateTime? From { get; set; }

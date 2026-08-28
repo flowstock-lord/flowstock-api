@@ -21,6 +21,19 @@ public interface IStockMovementService
 
     Task<StockMovementResponse> ConfirmAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Posts a movement that a production order owns: created and confirmed in one step, stamped
+    /// with the order it belongs to, and joined to the caller's transaction so the whole
+    /// production operation stays one unit of work.
+    ///
+    /// Consumption and production output never exist as drafts — the order's own status is the
+    /// workflow, which is why they cannot be created through <see cref="CreateAsync"/>.
+    /// </summary>
+    Task<StockMovementResponse> PostForProductionOrderAsync(
+        CreateStockMovementRequest request,
+        Guid productionOrderId,
+        CancellationToken cancellationToken);
+
     Task<StockMovementResponse> CancelAsync(
         Guid id,
         CancelStockMovementRequest request,
@@ -71,6 +84,11 @@ public class StockMovementService(
                 m.SourceLocationId == query.LocationId || m.DestinationLocationId == query.LocationId);
         }
 
+        if (query.ProductionOrderId is not null)
+        {
+            movements = movements.Where(m => m.ProductionOrderId == query.ProductionOrderId);
+        }
+
         if (query.From is not null)
         {
             movements = movements.Where(m => m.CreatedAt >= query.From);
@@ -101,41 +119,18 @@ public class StockMovementService(
     public async Task<StockMovementResponse> CreateAsync(
         CreateStockMovementRequest request,
         CancellationToken cancellationToken)
+        => ToResponse(await FindAsync(
+            (await CreateDraftAsync(request, productionOrderId: null, cancellationToken)).Id,
+            cancellationToken));
+
+    public async Task<StockMovementResponse> PostForProductionOrderAsync(
+        CreateStockMovementRequest request,
+        Guid productionOrderId,
+        CancellationToken cancellationToken)
     {
-        StockMovement.ValidateEndpoints(request.MovementType, request.SourceLocationId, request.DestinationLocationId);
+        var movement = await CreateDraftAsync(request, productionOrderId, cancellationToken);
 
-        var source = await ResolveLocationAsync(request.SourceLocationId, cancellationToken);
-        var destination = await ResolveLocationAsync(request.DestinationLocationId, cancellationToken);
-
-        var products = await ResolveProductsAsync(request.Lines, cancellationToken);
-
-        var movement = new StockMovement
-        {
-            Number = await NextNumberAsync(cancellationToken),
-            MovementType = request.MovementType,
-            Status = MovementStatus.Draft,
-            SourceLocationId = source?.Id,
-            DestinationLocationId = destination?.Id,
-            Reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(),
-            Lines = request.Lines.Select(line => new StockMovementLine
-            {
-                ProductId = line.ProductId,
-                // The unit follows the product, so a quantity can never be recorded in another one.
-                UnitOfMeasureId = products[line.ProductId].UnitOfMeasureId,
-                Quantity = line.Quantity
-            }).ToList()
-        };
-
-        db.StockMovements.Add(movement);
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation(
-            "Stock movement {Number} created as {MovementType} draft with {LineCount} line(s) " +
-            "from {SourceLocationId} to {DestinationLocationId}",
-            movement.Number, movement.MovementType, movement.Lines.Count,
-            movement.SourceLocationId, movement.DestinationLocationId);
-
-        return ToResponse(await FindAsync(movement.Id, cancellationToken));
+        return await ConfirmAsync(movement.Id, cancellationToken);
     }
 
     public async Task<StockMovementResponse> ConfirmAsync(Guid id, CancellationToken cancellationToken)
@@ -220,6 +215,48 @@ public class StockMovementService(
             movement.Number, movement.CancelledBy);
 
         return ToResponse(movement);
+    }
+
+    private async Task<StockMovement> CreateDraftAsync(
+        CreateStockMovementRequest request,
+        Guid? productionOrderId,
+        CancellationToken cancellationToken)
+    {
+        StockMovement.ValidateEndpoints(request.MovementType, request.SourceLocationId, request.DestinationLocationId);
+
+        var source = await ResolveLocationAsync(request.SourceLocationId, cancellationToken);
+        var destination = await ResolveLocationAsync(request.DestinationLocationId, cancellationToken);
+
+        var products = await ResolveProductsAsync(request.Lines, cancellationToken);
+
+        var movement = new StockMovement
+        {
+            Number = await NextNumberAsync(cancellationToken),
+            MovementType = request.MovementType,
+            Status = MovementStatus.Draft,
+            SourceLocationId = source?.Id,
+            DestinationLocationId = destination?.Id,
+            ProductionOrderId = productionOrderId,
+            Reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(),
+            Lines = request.Lines.Select(line => new StockMovementLine
+            {
+                ProductId = line.ProductId,
+                // The unit follows the product, so a quantity can never be recorded in another one.
+                UnitOfMeasureId = products[line.ProductId].UnitOfMeasureId,
+                Quantity = line.Quantity
+            }).ToList()
+        };
+
+        db.StockMovements.Add(movement);
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Stock movement {Number} created as {MovementType} draft with {LineCount} line(s) " +
+            "from {SourceLocationId} to {DestinationLocationId}",
+            movement.Number, movement.MovementType, movement.Lines.Count,
+            movement.SourceLocationId, movement.DestinationLocationId);
+
+        return movement;
     }
 
     /// <summary>
@@ -355,6 +392,7 @@ public class StockMovementService(
         movement.Number,
         movement.MovementType,
         movement.Status,
+        movement.ProductionOrderId,
         movement.SourceLocationId,
         movement.SourceLocation?.Code,
         movement.DestinationLocationId,

@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 5 (bills of materials) — done. Next: Phase 6 — production orders.**
+**Status: Phase 6 (production orders) — done. Next: Phase 7 — traceability.**
 
 ## Stack
 
@@ -88,6 +88,7 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Stock | `/api/stock`, `/api/stock/{productId}`, `/api/stock/by-location/{locationId}` | any authenticated (read-only) |
 | Stock movements | `/api/stock-movements`, `/{id}/confirm`, `/{id}/cancel` | read: any authenticated, write: Admin or WarehouseManager |
 | Bills of materials | `/api/boms`, `/{id}/requirements?quantity=`, `/{id}/activate`, `/{id}/deactivate` | read: any authenticated, write: Admin or ProductionManager |
+| Production orders | `/api/production-orders`, `/{id}/plan`, `/{id}/start`, `/{id}/complete`, `/{id}/cancel` | read: any authenticated, write: Admin or ProductionManager |
 
 Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
 (`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
@@ -98,6 +99,11 @@ a confirmed movement is corrected by a compensating one rather than edited.
 
 A bill of materials is versioned and immutable: publishing a new one supersedes the previous
 version rather than editing it, and every version can still be asked what a run would require.
+
+A production order runs `Draft → Planned → InProgress → Completed`. Planning reserves the
+materials at the production location, starting consumes them and completing books the finished
+goods into the output location — each step through confirmed stock movements that carry the
+order's id, so every gram is traceable to the run that used it.
 
 Tests:
 

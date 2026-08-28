@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 5 — done. Phase 6 (production orders) is next.**
+**Phase 6 — done. Phase 7 (traceability) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -104,8 +104,8 @@ abstractions declared in `Application`/`Domain`.
   `UNIT_OF_MEASURE_CODE_EXISTS`, `UNIT_OF_MEASURE_INACTIVE`, `WAREHOUSE_NOT_FOUND`,
   `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_NOT_FOUND`, `LOCATION_CODE_EXISTS`,
   `LOCATION_INACTIVE`, `MOVEMENT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `INVALID_MOVEMENT`,
-  `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`, `BOM_INVALID`.
-  Reserved for later phases: `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
+  `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`, `BOM_INVALID`,
+  `PRODUCTION_ORDER_NOT_FOUND`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
   Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
@@ -232,3 +232,35 @@ live in `appsettings.Development.json`.
   calculation — it does not look at stock. Checking availability belongs to Phase 6.
 - Reads are open to any authenticated user; writes need `Policies.Production`
   (docs/PLAN.md, section 25).
+
+## Production orders (Phase 6)
+
+- `ProductionOrder` and `ProductionOrderMaterial` live in `src/FlowStock.Domain/Production/`, next
+  to the recipes they are built from. `ProductionOrderService` runs the workflow;
+  `StockMovementService` still owns every write to stock.
+- The workflow is `Draft → Planned → InProgress → Completed`, plus `Cancelled` from `Draft` or
+  `Planned` only. A started run has confirmed movements behind it, so it is corrected with
+  compensating movements, never by cancelling it (rule 2).
+- **The order never touches stock itself.** Starting posts a `Consumption` movement out of the
+  production location, completing posts a `ProductionOutput` movement into the output location,
+  both created and confirmed through `IStockMovementService.PostForProductionOrderAsync` and
+  stamped with `StockMovement.ProductionOrderId` — which is what makes traceability work in both
+  directions (docs/PLAN.md, section 19). Those two types still cannot be posted by hand: the
+  create validator rejects them, and the order is the only author.
+- Materials are a **snapshot**, scaled from the recipe when the order is created, not a view over
+  it. A recipe may be superseded while a run is open, and the run must keep saying what it
+  undertook to consume. The order also records `BillOfMaterialId`, so it can show the exact
+  version it used.
+- `ProductionLocationId` is where materials are reserved and consumed; `OutputLocationId` is where
+  finished goods land. The second field is not in section 15's suggested list, but section 17
+  requires the output to land in a named location, and it is rarely the shop floor.
+- **Reservations are what planning buys.** Planning locks the balances the same way a confirmation
+  does and raises `ReservedQuantity`, so `AvailableQuantity` falls and a competing transfer is
+  refused. Starting releases the reservation and saves it *before* confirming the consumption —
+  otherwise the run's own reservation would make its own materials unavailable.
+- A production operation is one transaction. `IFlowStockDbContext.BeginTransactionAsync` joins an
+  already-open transaction instead of nesting, so the movements posted inside an order commit or
+  roll back with it.
+- Order numbers (`PRD-000001`) come from the `ProductionOrderNumbers` PostgreSQL sequence.
+- Reading orders is open to any authenticated user — production history is part of the audit
+  trail. Running one needs `Policies.Production` (docs/PLAN.md, section 25).
