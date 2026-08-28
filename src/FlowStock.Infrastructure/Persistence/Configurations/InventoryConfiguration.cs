@@ -28,10 +28,16 @@ public class StockConfiguration : IEntityTypeConfiguration<Stock>
         // Derived from the two stored quantities; never a column.
         builder.Ignore(s => s.AvailableQuantity);
 
-        // One balance per product per location — this is what makes the row lock in
-        // LockStockAsync address exactly one row.
-        builder.HasIndex(s => new { s.ProductId, s.LocationId }).IsUnique();
+        // One balance per product per location per lot — this is what makes the row lock in
+        // LockStockAsync address exactly one row. NULLS NOT DISTINCT so a product without batch
+        // tracking, whose BatchId is null, still gets exactly one balance per location: Postgres
+        // would otherwise treat every null as a different key and let duplicates through.
+        builder.HasIndex(s => new { s.ProductId, s.LocationId, s.BatchId })
+            .IsUnique()
+            .AreNullsDistinct(false);
+
         builder.HasIndex(s => s.LocationId);
+        builder.HasIndex(s => s.BatchId);
 
         builder.HasOne(s => s.Product)
             .WithMany()
@@ -41,6 +47,11 @@ public class StockConfiguration : IEntityTypeConfiguration<Stock>
         builder.HasOne(s => s.Location)
             .WithMany()
             .HasForeignKey(s => s.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(s => s.Batch)
+            .WithMany()
+            .HasForeignKey(s => s.BatchId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
@@ -97,6 +108,7 @@ public class StockMovementLineConfiguration : IEntityTypeConfiguration<StockMove
         builder.Property(l => l.Quantity).IsRequired().HasPrecision(18, 4);
 
         builder.HasIndex(l => l.ProductId);
+        builder.HasIndex(l => l.BatchId);
 
         // A line has no life of its own outside its document.
         builder.HasOne(l => l.StockMovement)
@@ -112,6 +124,39 @@ public class StockMovementLineConfiguration : IEntityTypeConfiguration<StockMove
         builder.HasOne(l => l.UnitOfMeasure)
             .WithMany()
             .HasForeignKey(l => l.UnitOfMeasureId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // A lot is named by the history that moved it, so it is never deleted out from under it.
+        builder.HasOne(l => l.Batch)
+            .WithMany()
+            .HasForeignKey(l => l.BatchId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class BatchConfiguration : IEntityTypeConfiguration<Batch>
+{
+    public void Configure(EntityTypeBuilder<Batch> builder)
+    {
+        builder.ToTable("Batches");
+
+        builder.HasKey(b => b.Id);
+
+        builder.Property(b => b.Number).IsRequired().HasMaxLength(64);
+        builder.Property(b => b.Supplier).HasMaxLength(200);
+        builder.Property(b => b.Notes).HasMaxLength(1000);
+        builder.Property(b => b.CreatedAt).IsRequired();
+
+        // A lot number identifies goods of one product, so it is unique within that product.
+        builder.HasIndex(b => new { b.ProductId, b.Number }).IsUnique();
+
+        // "Which lots expire first" is the question expiry management is made of.
+        builder.HasIndex(b => b.ExpiryDate);
+        builder.HasIndex(b => b.ProductionOrderId);
+
+        builder.HasOne(b => b.Product)
+            .WithMany()
+            .HasForeignKey(b => b.ProductId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

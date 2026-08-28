@@ -134,6 +134,8 @@ public class ProductionOrderService(
         var productionLocation = await ResolveLocationAsync(request.ProductionLocationId, cancellationToken);
         var outputLocation = await ResolveLocationAsync(request.OutputLocationId, cancellationToken);
 
+        var batches = await ResolveMaterialBatchesAsync(bom, request.Materials, cancellationToken);
+
         var order = new ProductionOrder
         {
             Number = await NextNumberAsync(cancellationToken),
@@ -150,6 +152,7 @@ public class ProductionOrderService(
                 ComponentProductId = item.ComponentProductId,
                 // The unit follows the component product, exactly as on a movement line.
                 UnitOfMeasureId = item.UnitOfMeasureId,
+                BatchId = batches.GetValueOrDefault(item.ComponentProductId)?.Id,
                 RequiredQuantity = bom.RequiredQuantityFor(item.Quantity, request.PlannedQuantity)
             }).ToList()
         };
@@ -198,7 +201,7 @@ public class ProductionOrderService(
 
         foreach (var material in order.Materials)
         {
-            var balance = balances[new StockKey(material.ComponentProductId, order.ProductionLocationId)];
+            var balance = balances[KeyOf(order, material)];
 
             if (balance.AvailableQuantity < material.RequiredQuantity)
             {
@@ -208,7 +211,9 @@ public class ProductionOrderService(
                     order.ProductionLocationId,
                     order.ProductionLocation.Code,
                     material.RequiredQuantity,
-                    balance.AvailableQuantity);
+                    balance.AvailableQuantity,
+                    material.BatchId,
+                    material.Batch?.Number);
             }
 
             balance.ReservedQuantity += material.RequiredQuantity;
@@ -252,7 +257,8 @@ public class ProductionOrderService(
                 DestinationLocationId: null,
                 Reason: $"Production order {order.Number}",
                 Lines: order.Materials
-                    .Select(m => new CreateStockMovementLineRequest(m.ComponentProductId, m.RequiredQuantity))
+                    .Select(m => new CreateStockMovementLineRequest(
+                        m.ComponentProductId, m.RequiredQuantity, m.BatchId))
                     .ToList()),
             order.Id,
             cancellationToken);
@@ -301,16 +307,19 @@ public class ProductionOrderService(
                 new Dictionary<string, object?> { ["producedQuantity"] = producedQuantity });
         }
 
+        var outputBatch = await ResolveOutputBatchAsync(order, request, cancellationToken);
+
         var output = await stockMovements.PostForProductionOrderAsync(
             new CreateStockMovementRequest(
                 MovementType.ProductionOutput,
                 SourceLocationId: null,
                 DestinationLocationId: order.OutputLocationId,
                 Reason: $"Production order {order.Number}",
-                Lines: [new CreateStockMovementLineRequest(order.ProductId, producedQuantity)]),
+                Lines: [new CreateStockMovementLineRequest(order.ProductId, producedQuantity, outputBatch?.Id)]),
             order.Id,
             cancellationToken);
 
+        order.OutputBatchId = outputBatch?.Id;
         order.ProducedQuantity = producedQuantity;
         order.Status = ProductionOrderStatus.Completed;
         order.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -397,7 +406,7 @@ public class ProductionOrderService(
 
         foreach (var material in order.Materials)
         {
-            var balance = balances[new StockKey(material.ComponentProductId, order.ProductionLocationId)];
+            var balance = balances[KeyOf(order, material)];
 
             // Never below zero: a reservation is released once, but the balance is a shared row and
             // has to stay a truthful number whatever else happened to it meanwhile.
@@ -415,14 +424,152 @@ public class ProductionOrderService(
         ProductionOrder order,
         CancellationToken cancellationToken)
     {
-        var keys = order.Materials
-            .Select(m => new StockKey(m.ComponentProductId, order.ProductionLocationId))
-            .ToHashSet();
+        var keys = order.Materials.Select(m => KeyOf(order, m)).ToHashSet();
 
         var balances = await db.LockStockAsync(keys, cancellationToken);
 
-        return balances.ToDictionary(s => new StockKey(s.ProductId, s.LocationId));
+        return balances.ToDictionary(s => new StockKey(s.ProductId, s.LocationId, s.BatchId));
     }
+
+    /// <summary>
+    /// Which lot of every component the run will take. A batch-tracked component must be given
+    /// one, anything else must not be, and a lot always belongs to the component it is named for.
+    /// </summary>
+    private async Task<Dictionary<Guid, Batch>> ResolveMaterialBatchesAsync(
+        BillOfMaterial bom,
+        IReadOnlyList<ProductionOrderMaterialBatchRequest>? requested,
+        CancellationToken cancellationToken)
+    {
+        var chosen = requested ?? [];
+
+        var duplicate = chosen.GroupBy(m => m.ComponentProductId).FirstOrDefault(g => g.Count() > 1);
+
+        if (duplicate is not null)
+        {
+            throw new ProductionOrderInvalidException(
+                "A component may be given only one batch on an order.",
+                new Dictionary<string, object?> { ["componentProductId"] = duplicate.Key });
+        }
+
+        var componentIds = bom.Items.Select(item => item.ComponentProductId).ToList();
+        var stray = chosen.FirstOrDefault(m => !componentIds.Contains(m.ComponentProductId));
+
+        if (stray is not null)
+        {
+            throw new ProductionOrderInvalidException(
+                "A batch was given for a product the recipe does not use.",
+                new Dictionary<string, object?> { ["componentProductId"] = stray.ComponentProductId });
+        }
+
+        var components = await db.Products
+            .Where(p => componentIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
+
+        var batchIds = chosen.Select(m => m.BatchId).ToList();
+
+        var batches = batchIds.Count == 0
+            ? new Dictionary<Guid, Batch>()
+            : await db.Batches.Where(b => batchIds.Contains(b.Id)).ToDictionaryAsync(b => b.Id, cancellationToken);
+
+        var resolved = new Dictionary<Guid, Batch>();
+
+        foreach (var componentId in componentIds)
+        {
+            var component = components[componentId];
+            var named = chosen.FirstOrDefault(m => m.ComponentProductId == componentId);
+
+            if (named is null)
+            {
+                if (component.IsBatchTracked)
+                {
+                    throw new BatchRequiredException(component.Id, component.Sku);
+                }
+
+                continue;
+            }
+
+            if (!component.IsBatchTracked)
+            {
+                throw new BatchNotAllowedException(component.Id, component.Sku);
+            }
+
+            var batch = batches.GetValueOrDefault(named.BatchId) ?? throw new BatchNotFoundException(named.BatchId);
+
+            if (batch.ProductId != component.Id)
+            {
+                throw new BatchInvalidException(
+                    $"Batch {batch.Number} does not belong to product {component.Sku}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["batchId"] = batch.Id,
+                        ["number"] = batch.Number,
+                        ["productId"] = component.Id,
+                        ["sku"] = component.Sku
+                    });
+            }
+
+            resolved[componentId] = batch;
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// The lot the finished goods are booked in under. A run makes new goods, so it makes a new
+    /// lot: the number is taken from the request, or from the order number, which is unique and
+    /// says where the goods came from. Nothing is created for a product that is not batch tracked.
+    /// </summary>
+    private async Task<Batch?> ResolveOutputBatchAsync(
+        ProductionOrder order,
+        CompleteProductionOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!order.Product.IsBatchTracked)
+        {
+            if (!string.IsNullOrWhiteSpace(request.OutputBatchNumber))
+            {
+                throw new BatchNotAllowedException(order.ProductId, order.Product.Sku);
+            }
+
+            return null;
+        }
+
+        var number = Batch.NormalizeNumber(
+            string.IsNullOrWhiteSpace(request.OutputBatchNumber) ? order.Number : request.OutputBatchNumber);
+
+        if (await db.Batches.AnyAsync(b => b.ProductId == order.ProductId && b.Number == number, cancellationToken))
+        {
+            throw new BatchNumberAlreadyExistsException(order.ProductId, number);
+        }
+
+        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
+        var batch = new Batch
+        {
+            ProductId = order.ProductId,
+            Number = number,
+            ProductionDate = today,
+            ExpiryDate = request.OutputBatchExpiryDate,
+            ProductionOrderId = order.Id,
+            Notes = $"Produced by production order {order.Number}"
+        };
+
+        if (batch.ExpiryDate is { } expiry && expiry < today)
+        {
+            throw new BatchInvalidException(
+                "A batch cannot expire before it was produced.",
+                new Dictionary<string, object?> { ["expiryDate"] = expiry, ["productionDate"] = today });
+        }
+
+        db.Batches.Add(batch);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return batch;
+    }
+
+    /// <summary>The balance one material of a run is taken from: its lot on the shop floor.</summary>
+    private static StockKey KeyOf(ProductionOrder order, ProductionOrderMaterial material)
+        => new(material.ComponentProductId, order.ProductionLocationId, material.BatchId);
 
     /// <summary>
     /// The recipe the run is built from: the one asked for, or the product's active version. An
@@ -503,7 +650,9 @@ public class ProductionOrderService(
         .Include(o => o.ProductionLocation)
         .Include(o => o.OutputLocation)
         .Include(o => o.Materials).ThenInclude(m => m.ComponentProduct)
-        .Include(o => o.Materials).ThenInclude(m => m.UnitOfMeasure);
+        .Include(o => o.Materials).ThenInclude(m => m.UnitOfMeasure)
+        .Include(o => o.Materials).ThenInclude(m => m.Batch)
+        .Include(o => o.OutputBatch);
 
     private static IQueryable<ProductionOrder> Sort(IQueryable<ProductionOrder> orders, string? sort)
     {
@@ -538,6 +687,8 @@ public class ProductionOrderService(
         order.ProductionLocation.Code,
         order.OutputLocationId,
         order.OutputLocation.Code,
+        order.OutputBatchId,
+        order.OutputBatch?.Number,
         order.Notes,
         order.Materials
             .OrderBy(m => m.ComponentProduct.Sku)
@@ -546,6 +697,8 @@ public class ProductionOrderService(
                 m.ComponentProductId,
                 m.ComponentProduct.Sku,
                 m.ComponentProduct.Name,
+                m.BatchId,
+                m.Batch?.Number,
                 m.RequiredQuantity,
                 m.ConsumedQuantity,
                 m.UnitOfMeasureId,

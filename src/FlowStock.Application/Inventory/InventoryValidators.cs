@@ -58,7 +58,7 @@ public class CancelStockMovementRequestValidator : AbstractValidator<CancelStock
 
 public class StockQueryValidator : AbstractValidator<StockQuery>
 {
-    private static readonly string[] SortFields = ["sku", "location", "quantity"];
+    private static readonly string[] SortFields = ["sku", "location", "quantity", "expiry"];
 
     public StockQueryValidator()
     {
@@ -82,5 +82,39 @@ public class StockMovementQueryValidator : AbstractValidator<StockMovementQuery>
             .GreaterThanOrEqualTo(x => x.From!.Value)
             .When(x => x.From is not null && x.To is not null)
             .WithMessage("'to' must not be earlier than 'from'.");
+    }
+}
+
+public class CreateBatchRequestValidator : AbstractValidator<CreateBatchRequest>
+{
+    public CreateBatchRequestValidator()
+    {
+        RuleFor(x => x.ProductId).NotEmpty();
+
+        // The lot number as it is written on the goods; normalized upper-case on save.
+        RuleFor(x => x.Number).NotEmpty().MaximumLength(64);
+        RuleFor(x => x.Supplier).MaximumLength(200);
+        RuleFor(x => x.Notes).MaximumLength(1000);
+    }
+}
+
+public class UpdateBatchRequestValidator : AbstractValidator<UpdateBatchRequest>
+{
+    public UpdateBatchRequestValidator()
+    {
+        RuleFor(x => x.Supplier).MaximumLength(200);
+        RuleFor(x => x.Notes).MaximumLength(1000);
+    }
+}
+
+public class BatchQueryValidator : AbstractValidator<BatchQuery>
+{
+    private static readonly string[] SortFields = ["number", "expiryDate", "createdAt"];
+
+    public BatchQueryValidator()
+    {
+        RuleFor(x => x.Sort)
+            .Must(sort => sort is null || SortFields.Contains(sort.TrimStart('-'), StringComparer.OrdinalIgnoreCase))
+            .WithMessage($"Sort must be one of: {string.Join(", ", SortFields)}, optionally prefixed with '-'.");
     }
 }

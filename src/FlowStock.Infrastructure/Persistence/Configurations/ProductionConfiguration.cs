@@ -116,6 +116,11 @@ public class ProductionOrderConfiguration : IEntityTypeConfiguration<ProductionO
             .HasForeignKey(o => o.OutputLocationId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(o => o.OutputBatch)
+            .WithMany()
+            .HasForeignKey(o => o.OutputBatchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // The movements an order posted point back at it. Declared from this side because the
         // inventory module knows nothing about production beyond the foreign key itself.
         builder.HasMany<StockMovement>()
@@ -159,6 +164,11 @@ public class ProductionOrderMaterialConfiguration : IEntityTypeConfiguration<Pro
         builder.HasOne(m => m.UnitOfMeasure)
             .WithMany()
             .HasForeignKey(m => m.UnitOfMeasureId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(m => m.Batch)
+            .WithMany()
+            .HasForeignKey(m => m.BatchId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

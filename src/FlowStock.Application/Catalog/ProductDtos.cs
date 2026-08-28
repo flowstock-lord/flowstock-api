@@ -11,19 +11,27 @@ public record ProductResponse(
     ProductType ProductType,
     Guid UnitOfMeasureId,
     string UnitOfMeasureCode,
+    bool IsBatchTracked,
     bool IsActive,
     DateTime CreatedAt,
     DateTime? UpdatedAt);
 
+/// <summary>
+/// <paramref name="IsBatchTracked"/> decides whether stock of this product is kept lot by lot
+/// (docs/PLAN.md, section 20). It is set here and never again: balances and history are recorded
+/// either with a batch or without one, and changing the answer later would make them unreadable.
+/// </summary>
 public record CreateProductRequest(
     string Sku,
     string Name,
     string? Description,
     ProductType ProductType,
-    Guid UnitOfMeasureId);
+    Guid UnitOfMeasureId,
+    bool IsBatchTracked = false);
 
 /// <summary>
 /// The SKU is immutable — it is the stable business identifier that inventory history refers to.
+/// So is batch tracking, for the same reason.
 /// </summary>
 public record UpdateProductRequest(
     string Name,
@@ -40,6 +48,9 @@ public class ProductQuery : PagedQuery
     public ProductType? ProductType { get; set; }
 
     public Guid? UnitOfMeasureId { get; set; }
+
+    /// <summary>Only products whose stock is kept lot by lot, or only those that are not.</summary>
+    public bool? IsBatchTracked { get; set; }
 
     public bool? IsActive { get; set; }
 

@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 7 (traceability) — done. Next: Phase 8 — batch / lot tracking.**
+**Status: Phase 8 (batch / lot tracking) — done. Next: Phase 9 — reporting.**
 
 ## Stack
 
@@ -89,7 +89,8 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Stock movements | `/api/stock-movements`, `/{id}/confirm`, `/{id}/cancel` | read: any authenticated, write: Admin or WarehouseManager |
 | Bills of materials | `/api/boms`, `/{id}/requirements?quantity=`, `/{id}/activate`, `/{id}/deactivate` | read: any authenticated, write: Admin or ProductionManager |
 | Production orders | `/api/production-orders`, `/{id}/plan`, `/{id}/start`, `/{id}/complete`, `/{id}/cancel` | read: any authenticated, write: Admin or ProductionManager |
-| Traceability | `/api/traceability/products/{id}/history`, `/products/{id}/usage`, `/production-orders/{id}` | any authenticated (read-only) |
+| Batches | `/api/batches` (filters `?productId=`, `?expiringBefore=`, `?isExpired=`) | read: any authenticated, write: Admin or WarehouseManager |
+| Traceability | `/api/traceability/products/{id}/history`, `/products/{id}/usage`, `/production-orders/{id}`, `/batches/{id}` | any authenticated (read-only) |
 
 Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
 (`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
@@ -109,6 +110,11 @@ order's id, so every gram is traceable to the run that used it.
 Traceability reads that history back in both directions: what a finished product was made of,
 which runs a raw material ended up in, and who moved it when. It adds no table of its own — it
 derives everything from confirmed movements and production orders.
+
+Batch tracking is opt-in per product. For a tracked product every movement line names the lot it
+moves and stock is kept lot by lot, so a delivery can be followed to the production run that
+consumed it and on to the goods that run made. The warehouse always names the lot; the system
+never picks one on its behalf.
 
 Tests:
 

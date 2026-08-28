@@ -23,6 +23,13 @@ public class Product : IAuditable
 
     public UnitOfMeasure UnitOfMeasure { get; set; } = null!;
 
+    /// <summary>
+    /// Whether stock of this product is tracked lot by lot (docs/PLAN.md, section 20). Set when
+    /// the product is created and immutable afterwards: existing balances and history are recorded
+    /// either with a batch or without one, and flipping the flag would make them unreadable.
+    /// </summary>
+    public bool IsBatchTracked { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; }

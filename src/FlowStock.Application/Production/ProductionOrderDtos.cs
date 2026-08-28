@@ -9,6 +9,9 @@ public record ProductionOrderMaterialResponse(
     Guid ComponentProductId,
     string ComponentSku,
     string ComponentName,
+    // The lot this run will take, for a batch-tracked component.
+    Guid? BatchId,
+    string? BatchNumber,
     decimal RequiredQuantity,
     decimal ConsumedQuantity,
     Guid UnitOfMeasureId,
@@ -35,6 +38,9 @@ public record ProductionOrderResponse(
     string ProductionLocationCode,
     Guid OutputLocationId,
     string OutputLocationCode,
+    // The lot the finished goods were booked in under, once the run has completed.
+    Guid? OutputBatchId,
+    string? OutputBatchNumber,
     string? Notes,
     IReadOnlyList<ProductionOrderMaterialResponse> Materials,
     DateTime? PlannedStartAt,
@@ -60,13 +66,30 @@ public record CreateProductionOrderRequest(
     Guid OutputLocationId,
     Guid? BillOfMaterialId,
     DateTime? PlannedStartAt,
-    string? Notes);
+    string? Notes,
+    IReadOnlyList<ProductionOrderMaterialBatchRequest>? Materials = null);
+
+/// <summary>
+/// Which lot the run will take of one component. Required for every batch-tracked component and
+/// rejected for any other: a run names the goods it will consume, the system never picks them
+/// (docs/PLAN.md, section 20).
+/// </summary>
+public record ProductionOrderMaterialBatchRequest(Guid ComponentProductId, Guid BatchId);
 
 /// <summary>
 /// Completes a run. <paramref name="ProducedQuantity"/> may differ from the planned quantity —
 /// a run yields what it yields — and defaults to the planned quantity when omitted.
 /// </summary>
-public record CompleteProductionOrderRequest(decimal? ProducedQuantity, string? Notes);
+/// <summary>
+/// <paramref name="OutputBatchNumber"/> names the lot the finished goods are booked in under. It
+/// is required only for a batch-tracked product, where it defaults to the order number if omitted,
+/// and rejected for any other.
+/// </summary>
+public record CompleteProductionOrderRequest(
+    decimal? ProducedQuantity,
+    string? Notes,
+    string? OutputBatchNumber = null,
+    DateOnly? OutputBatchExpiryDate = null);
 
 public record CancelProductionOrderRequest(string? Reason);
 

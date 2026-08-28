@@ -19,6 +19,15 @@ public class StockMovementLine
     public Product Product { get; set; } = null!;
 
     /// <summary>
+    /// Which lot moved. Required for a batch-tracked product and null for every other one — the
+    /// warehouse names the batch, the system never picks one on its behalf (docs/PLAN.md,
+    /// section 20). One line moves one lot; taking from two lots is two lines.
+    /// </summary>
+    public Guid? BatchId { get; set; }
+
+    public Batch? Batch { get; set; }
+
+    /// <summary>
     /// Copied from the product so the line stays self-describing: history says which unit the
     /// quantity was recorded in, and quantities are never mixed across units.
     /// </summary>

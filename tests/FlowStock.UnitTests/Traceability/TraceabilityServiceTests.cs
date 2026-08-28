@@ -42,7 +42,7 @@ public class TraceabilityServiceTests
             _fixture.CurrentUser,
             TimeProvider.System,
             NullLogger<ProductionOrderService>.Instance);
-        _traceability = new TraceabilityService(_fixture.Db);
+        _traceability = new TraceabilityService(_fixture.Db, TimeProvider.System);
     }
 
     /// <summary>

@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 7 — done. Phase 8 (batch / lot tracking) is next.**
+**Phase 8 — done. Phase 9 (reporting) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -105,7 +105,8 @@ abstractions declared in `Application`/`Domain`.
   `WAREHOUSE_CODE_EXISTS`, `WAREHOUSE_INACTIVE`, `LOCATION_NOT_FOUND`, `LOCATION_CODE_EXISTS`,
   `LOCATION_INACTIVE`, `MOVEMENT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `INVALID_MOVEMENT`,
   `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`, `BOM_INVALID`,
-  `PRODUCTION_ORDER_NOT_FOUND`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`.
+  `PRODUCTION_ORDER_NOT_FOUND`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`,
+  `BATCH_NOT_FOUND`, `BATCH_NUMBER_EXISTS`, `BATCH_REQUIRED`, `BATCH_NOT_ALLOWED`, `BATCH_INVALID`.
   Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
@@ -288,3 +289,34 @@ live in `appsettings.Development.json`.
 - `StockFlow` is a presentation concept, not a domain rule, so it lives in the Application layer:
   asked about a product it reads In / Out / Transfer, asked about a location it reads relative to
   that location.
+
+## Batches and lots (Phase 8)
+
+- `Batch` lives in `src/FlowStock.Domain/Inventory/`, not in the catalogue: a lot is goods that
+  arrived or were made, not a definition. `BatchService` registers and reads lots and never touches
+  stock — how much of a lot is left is a `Stock` balance like any other.
+- **Tracking is opt-in per product.** `Product.IsBatchTracked` is set when the product is created
+  and immutable afterwards, for the same reason the SKU is: balances and history are recorded
+  either with a lot or without one, and flipping the flag would make them unreadable.
+- **The warehouse names the lot; the system never picks one.** A movement line carries `BatchId`,
+  required for a tracked product and rejected for any other. One line moves one lot — taking from
+  two lots is two lines, and that is no longer a duplicate: the "same product twice" rule is now
+  per (product, lot). There is deliberately no automatic FEFO allocation.
+- **A balance is per (product, location, lot).** The unique index behind `LockStockAsync` is
+  `(ProductId, LocationId, BatchId)` declared **`NULLS NOT DISTINCT`**: without it Postgres treats
+  every null batch as a different key, and an untracked product would open a new anonymous balance
+  on every receipt. The locking SQL matches lots with `IS NOT DISTINCT FROM` for the same reason.
+- A production order names the lot of every tracked component when it is created, so the
+  reservation holds the exact goods the run counted on. Completing a run of a tracked product
+  creates the output lot — numbered after the order unless the request names one — and links it
+  back with `Batch.ProductionOrderId`.
+- Lot numbers are normalized upper-case and unique per product, and immutable after creation.
+  Supplier is free text: there is no purchasing module in any phase of docs/PLAN.md.
+- Nothing blocks issuing an expired lot. Expiry is reported (`IsExpired`, `?expiringBefore=`,
+  soonest-expiry-first ordering) and acting on it is Phase 10's notification, not a hidden rule
+  invented here.
+- `GET /api/traceability/batches/{id}` is where lot traceability lands: what the lot is, where it
+  is now, every movement that touched it, and the runs it ended up in. With a lot in hand the chain
+  is exact, so `MaterialSource` stops being a list of candidates for tracked products.
+- Reading lots is open to any authenticated user; registering one needs `Policies.Warehouse` —
+  a lot appears when goods arrive, which is a warehouse operation, not catalogue maintenance.

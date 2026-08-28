@@ -8,6 +8,9 @@ public record StockMovementLineResponse(
     Guid ProductId,
     string Sku,
     string ProductName,
+    // The lot that moved, for a batch-tracked product (docs/PLAN.md, section 20).
+    Guid? BatchId,
+    string? BatchNumber,
     decimal Quantity,
     Guid UnitOfMeasureId,
     string UnitOfMeasureCode);
@@ -36,8 +39,15 @@ public record StockMovementResponse(
     DateTime? CancelledAt,
     Guid? CancelledBy);
 
-/// <summary>The unit is taken from the product, so a quantity can never be recorded in the wrong one.</summary>
-public record CreateStockMovementLineRequest(Guid ProductId, decimal Quantity);
+/// <summary>
+/// The unit is taken from the product, so a quantity can never be recorded in the wrong one.
+///
+/// <paramref name="BatchId"/> names the lot that moves. It is required for a batch-tracked product
+/// and rejected for any other: the warehouse says which goods moved, the system never picks a lot
+/// on its behalf (docs/PLAN.md, section 20). One line moves one lot — taking from two lots is two
+/// lines.
+/// </summary>
+public record CreateStockMovementLineRequest(Guid ProductId, decimal Quantity, Guid? BatchId = null);
 
 /// <summary>
 /// Creates a Draft movement. Nothing happens to stock until it is confirmed
@@ -70,6 +80,9 @@ public class StockMovementQuery : PagedQuery
 
     /// <summary>Movements a given production run posted — its consumption and its output.</summary>
     public Guid? ProductionOrderId { get; set; }
+
+    /// <summary>Movements that touched one lot, on any line.</summary>
+    public Guid? BatchId { get; set; }
 
     /// <summary>Inclusive lower bound on CreatedAt, UTC.</summary>
     public DateTime? From { get; set; }

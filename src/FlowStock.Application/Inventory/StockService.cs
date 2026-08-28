@@ -20,6 +20,7 @@ public class StockService(IFlowStockDbContext db) : IStockService
         var stocks = db.Stocks
             .Include(s => s.Product).ThenInclude(p => p.UnitOfMeasure)
             .Include(s => s.Location).ThenInclude(l => l.Warehouse)
+            .Include(s => s.Batch)
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -38,6 +39,16 @@ public class StockService(IFlowStockDbContext db) : IStockService
         if (query.LocationId is not null)
         {
             stocks = stocks.Where(s => s.LocationId == query.LocationId);
+        }
+
+        if (query.BatchId is not null)
+        {
+            stocks = stocks.Where(s => s.BatchId == query.BatchId);
+        }
+
+        if (query.ExpiringBefore is { } before)
+        {
+            stocks = stocks.Where(s => s.Batch != null && s.Batch.ExpiryDate != null && s.Batch.ExpiryDate < before);
         }
 
         if (query.WarehouseId is not null)
@@ -77,8 +88,12 @@ public class StockService(IFlowStockDbContext db) : IStockService
                 .ThenByDescending(s => s.Location.Code).ThenBy(s => s.Product.Sku),
             ("quantity", false) => stocks.OrderBy(s => s.Quantity).ThenBy(s => s.Product.Sku),
             ("quantity", true) => stocks.OrderByDescending(s => s.Quantity).ThenBy(s => s.Product.Sku),
+            // Within a product and location, the lot that expires first comes first.
+            ("expiry", true) => stocks.OrderByDescending(s => s.Batch!.ExpiryDate).ThenBy(s => s.Product.Sku),
+            ("expiry", false) => stocks.OrderBy(s => s.Batch!.ExpiryDate).ThenBy(s => s.Product.Sku),
             (_, true) => stocks.OrderByDescending(s => s.Product.Sku).ThenBy(s => s.Location.Code),
             _ => stocks.OrderBy(s => s.Product.Sku).ThenBy(s => s.Location.Code)
+                .ThenBy(s => s.Batch!.ExpiryDate).ThenBy(s => s.Batch!.Number)
         };
     }
 
@@ -88,6 +103,9 @@ public class StockService(IFlowStockDbContext db) : IStockService
         stock.Product.Sku,
         stock.Product.Name,
         stock.Product.UnitOfMeasure.Code,
+        stock.BatchId,
+        stock.Batch?.Number,
+        stock.Batch?.ExpiryDate,
         stock.LocationId,
         stock.Location.Code,
         stock.Location.WarehouseId,

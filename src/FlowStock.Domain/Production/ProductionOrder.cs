@@ -1,5 +1,6 @@
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Common;
+using FlowStock.Domain.Inventory;
 using FlowStock.Domain.Warehouses;
 
 namespace FlowStock.Domain.Production;
@@ -61,6 +62,14 @@ public class ProductionOrder : IAuditable
     public DateTime? CancelledAt { get; set; }
 
     public Guid? CancelledBy { get; set; }
+
+    /// <summary>
+    /// The lot the finished goods were booked in under, for a batch-tracked product. Created when
+    /// the run completes, so the goods it made can be traced forward from here.
+    /// </summary>
+    public Guid? OutputBatchId { get; set; }
+
+    public Batch? OutputBatch { get; set; }
 
     /// <summary>Free text: why this run exists, or why it was cancelled.</summary>
     public string? Notes { get; set; }

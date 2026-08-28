@@ -1,4 +1,5 @@
 using FlowStock.Domain.Catalog;
+using FlowStock.Domain.Inventory;
 
 namespace FlowStock.Domain.Production;
 
@@ -21,6 +22,15 @@ public class ProductionOrderMaterial
     public Guid ComponentProductId { get; set; }
 
     public Product ComponentProduct { get; set; } = null!;
+
+    /// <summary>
+    /// The lot the run will take, for a batch-tracked component; null for anything else. It is
+    /// chosen when the order is written, not when it starts, so the reservation can hold the exact
+    /// goods the run counted on (docs/PLAN.md, section 20).
+    /// </summary>
+    public Guid? BatchId { get; set; }
+
+    public Batch? Batch { get; set; }
 
     /// <summary>Copied from the component product, exactly as on a movement line.</summary>
     public Guid UnitOfMeasureId { get; set; }

@@ -23,6 +23,15 @@ public class Stock : IAuditable
 
     public StorageLocation Location { get; set; } = null!;
 
+    /// <summary>
+    /// The lot this balance holds, for a batch-tracked product; null for everything else
+    /// (docs/PLAN.md, section 20). A tracked product has one balance per lot per location, so the
+    /// question "how much of batch FL-2026-0828 is left on the line" is a row, not a calculation.
+    /// </summary>
+    public Guid? BatchId { get; set; }
+
+    public Batch? Batch { get; set; }
+
     public decimal Quantity { get; set; }
 
     /// <summary>Reserved by an operation that has not consumed it yet. Reservations arrive in Phase 6.</summary>
@@ -40,5 +49,8 @@ public class Stock : IAuditable
     public Guid? UpdatedBy { get; set; }
 }
 
-/// <summary>Identifies one stock balance. Used to load the exact rows an operation will touch.</summary>
-public readonly record struct StockKey(Guid ProductId, Guid LocationId);
+/// <summary>
+/// Identifies one stock balance. Used to load the exact rows an operation will touch.
+/// <paramref name="BatchId"/> is null for a product that is not batch tracked.
+/// </summary>
+public readonly record struct StockKey(Guid ProductId, Guid LocationId, Guid? BatchId = null);

@@ -46,6 +46,11 @@ public class ProductService(
             products = products.Where(p => p.UnitOfMeasureId == query.UnitOfMeasureId);
         }
 
+        if (query.IsBatchTracked is not null)
+        {
+            products = products.Where(p => p.IsBatchTracked == query.IsBatchTracked);
+        }
+
         if (query.IsActive is not null)
         {
             products = products.Where(p => p.IsActive == query.IsActive);
@@ -87,6 +92,7 @@ public class ProductService(
             ProductType = request.ProductType,
             UnitOfMeasureId = unit.Id,
             UnitOfMeasure = unit,
+            IsBatchTracked = request.IsBatchTracked,
             IsActive = true
         };
 
@@ -179,6 +185,7 @@ public class ProductService(
         product.ProductType,
         product.UnitOfMeasureId,
         product.UnitOfMeasure.Code,
+        product.IsBatchTracked,
         product.IsActive,
         product.CreatedAt,
         product.UpdatedAt);

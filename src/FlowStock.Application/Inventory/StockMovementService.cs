@@ -84,6 +84,11 @@ public class StockMovementService(
                 m.SourceLocationId == query.LocationId || m.DestinationLocationId == query.LocationId);
         }
 
+        if (query.BatchId is not null)
+        {
+            movements = movements.Where(m => m.Lines.Any(l => l.BatchId == query.BatchId));
+        }
+
         if (query.ProductionOrderId is not null)
         {
             movements = movements.Where(m => m.ProductionOrderId == query.ProductionOrderId);
@@ -150,7 +155,7 @@ public class StockMovementService(
         {
             if (movement.SourceLocationId is { } sourceId)
             {
-                var source = balances[new StockKey(line.ProductId, sourceId)];
+                var source = balances[new StockKey(line.ProductId, sourceId, line.BatchId)];
 
                 // Checked before the subtraction so the error can report what was actually there.
                 if (source.AvailableQuantity < line.Quantity)
@@ -161,7 +166,9 @@ public class StockMovementService(
                         sourceId,
                         movement.SourceLocation!.Code,
                         line.Quantity,
-                        source.AvailableQuantity);
+                        source.AvailableQuantity,
+                        line.BatchId,
+                        line.Batch?.Number);
                 }
 
                 source.Quantity -= line.Quantity;
@@ -169,7 +176,7 @@ public class StockMovementService(
 
             if (movement.DestinationLocationId is { } destinationId)
             {
-                balances[new StockKey(line.ProductId, destinationId)].Quantity += line.Quantity;
+                balances[new StockKey(line.ProductId, destinationId, line.BatchId)].Quantity += line.Quantity;
             }
         }
 
@@ -228,6 +235,7 @@ public class StockMovementService(
         var destination = await ResolveLocationAsync(request.DestinationLocationId, cancellationToken);
 
         var products = await ResolveProductsAsync(request.Lines, cancellationToken);
+        await ValidateBatchesAsync(request.Lines, products, cancellationToken);
 
         var movement = new StockMovement
         {
@@ -243,6 +251,7 @@ public class StockMovementService(
                 ProductId = line.ProductId,
                 // The unit follows the product, so a quantity can never be recorded in another one.
                 UnitOfMeasureId = products[line.ProductId].UnitOfMeasureId,
+                BatchId = line.BatchId,
                 Quantity = line.Quantity
             }).ToList()
         };
@@ -273,18 +282,18 @@ public class StockMovementService(
         {
             if (movement.SourceLocationId is { } sourceId)
             {
-                keys.Add(new StockKey(line.ProductId, sourceId));
+                keys.Add(new StockKey(line.ProductId, sourceId, line.BatchId));
             }
 
             if (movement.DestinationLocationId is { } destinationId)
             {
-                keys.Add(new StockKey(line.ProductId, destinationId));
+                keys.Add(new StockKey(line.ProductId, destinationId, line.BatchId));
             }
         }
 
         var stocks = await db.LockStockAsync(keys, cancellationToken);
 
-        return stocks.ToDictionary(s => new StockKey(s.ProductId, s.LocationId));
+        return stocks.ToDictionary(s => new StockKey(s.ProductId, s.LocationId, s.BatchId));
     }
 
     private static void RequireDraft(StockMovement movement)
@@ -331,7 +340,8 @@ public class StockMovementService(
     /// <summary>
     /// A deactivated product is still allowed to move: stock that already exists has to be able to
     /// leave the warehouse. What is rejected is a product that does not exist, and the same product
-    /// twice in one document, which would leave the intended quantity ambiguous.
+    /// and lot twice in one document, which would leave the intended quantity ambiguous. The same
+    /// product in two different lots is not a duplicate: it is how two lots are taken at once.
     /// </summary>
     private async Task<Dictionary<Guid, Product>> ResolveProductsAsync(
         IReadOnlyList<CreateStockMovementLineRequest> lines,
@@ -339,15 +349,19 @@ public class StockMovementService(
     {
         var productIds = lines.Select(l => l.ProductId).ToList();
 
-        var duplicate = productIds
-            .GroupBy(id => id)
+        var duplicate = lines
+            .GroupBy(l => (l.ProductId, l.BatchId))
             .FirstOrDefault(group => group.Count() > 1);
 
         if (duplicate is not null)
         {
             throw new InvalidMovementException(
-                "A product may appear only once in a movement; add its quantities together.",
-                new Dictionary<string, object?> { ["productId"] = duplicate.Key });
+                "A product may appear only once per batch in a movement; add its quantities together.",
+                new Dictionary<string, object?>
+                {
+                    ["productId"] = duplicate.Key.ProductId,
+                    ["batchId"] = duplicate.Key.BatchId
+                });
         }
 
         var products = await db.Products
@@ -357,6 +371,60 @@ public class StockMovementService(
         var missing = productIds.FirstOrDefault(id => !products.ContainsKey(id));
 
         return missing == Guid.Empty ? products : throw new ProductNotFoundException(missing);
+    }
+
+    /// <summary>
+    /// Checks the lots the document names against the products that own them: a batch-tracked
+    /// product must name one, anything else must not, and a lot always belongs to its own product
+    /// (docs/PLAN.md, section 20).
+    /// </summary>
+    private async Task ValidateBatchesAsync(
+        IReadOnlyList<CreateStockMovementLineRequest> lines,
+        IReadOnlyDictionary<Guid, Product> products,
+        CancellationToken cancellationToken)
+    {
+        var batchIds = lines.Select(l => l.BatchId).OfType<Guid>().Distinct().ToList();
+
+        var batches = batchIds.Count == 0
+            ? new Dictionary<Guid, Batch>()
+            : await db.Batches
+                .Where(b => batchIds.Contains(b.Id))
+                .ToDictionaryAsync(b => b.Id, cancellationToken);
+
+        foreach (var line in lines)
+        {
+            var product = products[line.ProductId];
+
+            if (line.BatchId is not { } batchId)
+            {
+                if (product.IsBatchTracked)
+                {
+                    throw new BatchRequiredException(product.Id, product.Sku);
+                }
+
+                continue;
+            }
+
+            if (!product.IsBatchTracked)
+            {
+                throw new BatchNotAllowedException(product.Id, product.Sku);
+            }
+
+            var batch = batches.GetValueOrDefault(batchId) ?? throw new BatchNotFoundException(batchId);
+
+            if (batch.ProductId != product.Id)
+            {
+                throw new BatchInvalidException(
+                    $"Batch {batch.Number} does not belong to product {product.Sku}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["batchId"] = batch.Id,
+                        ["number"] = batch.Number,
+                        ["productId"] = product.Id,
+                        ["sku"] = product.Sku
+                    });
+            }
+        }
     }
 
     private async Task<string> NextNumberAsync(CancellationToken cancellationToken)
@@ -370,7 +438,8 @@ public class StockMovementService(
         .Include(m => m.SourceLocation)
         .Include(m => m.DestinationLocation)
         .Include(m => m.Lines).ThenInclude(l => l.Product)
-        .Include(m => m.Lines).ThenInclude(l => l.UnitOfMeasure);
+        .Include(m => m.Lines).ThenInclude(l => l.UnitOfMeasure)
+        .Include(m => m.Lines).ThenInclude(l => l.Batch);
 
     private static IQueryable<StockMovement> Sort(IQueryable<StockMovement> movements, string? sort)
     {
@@ -400,11 +469,14 @@ public class StockMovementService(
         movement.Reason,
         movement.Lines
             .OrderBy(l => l.Product.Sku)
+            .ThenBy(l => l.Batch?.Number)
             .Select(l => new StockMovementLineResponse(
                 l.Id,
                 l.ProductId,
                 l.Product.Sku,
                 l.Product.Name,
+                l.BatchId,
+                l.Batch?.Number,
                 l.Quantity,
                 l.UnitOfMeasureId,
                 l.UnitOfMeasure.Code))

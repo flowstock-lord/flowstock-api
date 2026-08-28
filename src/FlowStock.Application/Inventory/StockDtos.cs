@@ -12,6 +12,10 @@ public record StockResponse(
     string Sku,
     string ProductName,
     string UnitOfMeasureCode,
+    // The lot this balance holds, for a batch-tracked product (docs/PLAN.md, section 20).
+    Guid? BatchId,
+    string? BatchNumber,
+    DateOnly? BatchExpiryDate,
     Guid LocationId,
     string LocationCode,
     Guid WarehouseId,
@@ -30,6 +34,12 @@ public class StockQuery : PagedQuery
     public Guid? ProductId { get; set; }
 
     public Guid? LocationId { get; set; }
+
+    /// <summary>The balance of one lot, wherever it sits.</summary>
+    public Guid? BatchId { get; set; }
+
+    /// <summary>Only lots expiring before this day — what the shelf should be emptied of first.</summary>
+    public DateOnly? ExpiringBefore { get; set; }
 
     /// <summary>Every location of one warehouse.</summary>
     public Guid? WarehouseId { get; set; }

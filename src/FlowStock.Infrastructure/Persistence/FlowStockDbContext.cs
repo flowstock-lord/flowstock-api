@@ -47,6 +47,8 @@ public class FlowStockDbContext(
 
     public DbSet<Stock> Stocks => Set<Stock>();
 
+    public DbSet<Batch> Batches => Set<Batch>();
+
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
 
     public DbSet<StockMovementLine> StockMovementLines => Set<StockMovementLine>();
@@ -113,6 +115,7 @@ public class FlowStockDbContext(
 
         var productIds = keys.Select(k => k.ProductId).ToArray();
         var locationIds = keys.Select(k => k.LocationId).ToArray();
+        var batchIds = keys.Select(k => k.BatchId).ToArray();
 
         var locked = await LockAsync();
 
@@ -126,7 +129,7 @@ public class FlowStockDbContext(
         // the row, and the second lock below then covers them all.
         await Database.ExecuteSqlRawAsync(
             InsertMissingBalancesSql,
-            [Products(productIds), Locations(locationIds)],
+            [Products(productIds), Locations(locationIds), Batches(batchIds)],
             cancellationToken);
 
         return await LockAsync();
@@ -135,11 +138,18 @@ public class FlowStockDbContext(
         // here and then reads the balance we leave behind rather than the one we started from.
         // The ordering is fixed so two operations touching the same rows cannot deadlock.
         Task<List<Stock>> LockAsync() => Stocks
-            .FromSqlRaw(LockBalancesSql, Products(productIds), Locations(locationIds))
+            .FromSqlRaw(LockBalancesSql, Products(productIds), Locations(locationIds), Batches(batchIds))
             .ToListAsync(cancellationToken);
 
         static NpgsqlParameter Products(Guid[] ids) => new("products", ids);
         static NpgsqlParameter Locations(Guid[] ids) => new("locations", ids);
+
+        // A balance of an untracked product has no batch, so the array carries nulls and every
+        // comparison below is null-safe.
+        static NpgsqlParameter Batches(Guid?[] ids) => new("batches", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid)
+        {
+            Value = ids
+        };
     }
 
     public async Task<long> NextMovementNumberAsync(CancellationToken cancellationToken)
@@ -187,11 +197,11 @@ public class FlowStockDbContext(
         foreach (var key in keys)
         {
             var stock = existing.FirstOrDefault(
-                s => s.ProductId == key.ProductId && s.LocationId == key.LocationId);
+                s => s.ProductId == key.ProductId && s.LocationId == key.LocationId && s.BatchId == key.BatchId);
 
             if (stock is null)
             {
-                stock = new Stock { ProductId = key.ProductId, LocationId = key.LocationId };
+                stock = new Stock { ProductId = key.ProductId, LocationId = key.LocationId, BatchId = key.BatchId };
                 Stocks.Add(stock);
             }
 
@@ -225,20 +235,25 @@ public class FlowStockDbContext(
         }
     }
 
+    // The unique index behind this ON CONFLICT is declared NULLS NOT DISTINCT, so the balance of
+    // an untracked product — whose BatchId is null — collides with itself the way a tracked one does.
     private const string InsertMissingBalancesSql =
         """
-        INSERT INTO "Stocks" ("Id", "ProductId", "LocationId", "Quantity", "ReservedQuantity", "CreatedAt")
-        SELECT gen_random_uuid(), k.product_id, k.location_id, 0, 0, now()
-        FROM unnest(@products, @locations) AS k(product_id, location_id)
-        ON CONFLICT ("ProductId", "LocationId") DO NOTHING
+        INSERT INTO "Stocks" ("Id", "ProductId", "LocationId", "BatchId", "Quantity", "ReservedQuantity", "CreatedAt")
+        SELECT gen_random_uuid(), k.product_id, k.location_id, k.batch_id, 0, 0, now()
+        FROM unnest(@products, @locations, @batches) AS k(product_id, location_id, batch_id)
+        ON CONFLICT ("ProductId", "LocationId", "BatchId") DO NOTHING
         """;
 
+    // IS NOT DISTINCT FROM, not =, because a balance without a batch must still match its key.
     private const string LockBalancesSql =
         """
         SELECT s.* FROM "Stocks" AS s
-        JOIN unnest(@products, @locations) AS k(product_id, location_id)
-          ON s."ProductId" = k.product_id AND s."LocationId" = k.location_id
-        ORDER BY s."ProductId", s."LocationId"
+        JOIN unnest(@products, @locations, @batches) AS k(product_id, location_id, batch_id)
+          ON s."ProductId" = k.product_id
+         AND s."LocationId" = k.location_id
+         AND s."BatchId" IS NOT DISTINCT FROM k.batch_id
+        ORDER BY s."ProductId", s."LocationId", s."BatchId"
         FOR UPDATE OF s
         """;
 

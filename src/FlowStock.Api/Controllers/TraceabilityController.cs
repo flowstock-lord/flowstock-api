@@ -44,6 +44,18 @@ public class TraceabilityController(ITraceabilityService traceability) : Control
         => Ok(await traceability.MaterialUsageAsync(productId, query, cancellationToken));
 
     /// <summary>
+    /// One lot, end to end: what it is, where it came from, where it is now, everything that moved
+    /// it, and which production runs it ended up in.
+    /// </summary>
+    [HttpGet("batches/{batchId:guid}")]
+    [ProducesResponseType<BatchTraceResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ErrorResponse>(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BatchTraceResponse>> BatchTrace(
+        Guid batchId,
+        CancellationToken cancellationToken)
+        => Ok(await traceability.BatchTraceAsync(batchId, cancellationToken));
+
+    /// <summary>
     /// Backward traceability: what one production run was made of — recipe version, materials,
     /// the movements that consumed them, where those materials came from, and where the finished
     /// goods went.

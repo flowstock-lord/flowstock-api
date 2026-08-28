@@ -29,6 +29,8 @@ public interface IFlowStockDbContext
 
     DbSet<Stock> Stocks { get; }
 
+    DbSet<Batch> Batches { get; }
+
     DbSet<StockMovement> StockMovements { get; }
 
     DbSet<StockMovementLine> StockMovementLines { get; }

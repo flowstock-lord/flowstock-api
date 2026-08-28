@@ -83,6 +83,13 @@ public class CreateProductionOrderRequestValidator : AbstractValidator<CreatePro
             .WithMessage("Planned quantity may have at most 4 decimal places.");
 
         RuleFor(x => x.Notes).MaximumLength(1000);
+
+        // One batch per component; which components need one is a domain rule, not a shape rule.
+        RuleForEach(x => x.Materials).ChildRules(material =>
+        {
+            material.RuleFor(m => m.ComponentProductId).NotEmpty();
+            material.RuleFor(m => m.BatchId).NotEmpty();
+        });
     }
 }
 
@@ -97,6 +104,7 @@ public class CompleteProductionOrderRequestValidator : AbstractValidator<Complet
             .WithMessage("Produced quantity may have at most 4 decimal places.")
             .When(x => x.ProducedQuantity is not null);
 
+        RuleFor(x => x.OutputBatchNumber).MaximumLength(64);
         RuleFor(x => x.Notes).MaximumLength(1000);
     }
 }

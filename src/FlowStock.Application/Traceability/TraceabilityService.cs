@@ -19,6 +19,8 @@ public interface ITraceabilityService
         Guid productId,
         MaterialUsageQuery query,
         CancellationToken cancellationToken);
+
+    Task<BatchTraceResponse> BatchTraceAsync(Guid batchId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -29,7 +31,7 @@ public interface ITraceabilityService
 /// confirmed movements and production orders and can never become another way to change stock
 /// (CLAUDE.md, rule 1).
 /// </summary>
-public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
+public class TraceabilityService(IFlowStockDbContext db, TimeProvider timeProvider) : ITraceabilityService
 {
     /// <summary>
     /// How many inbound movements are listed as the possible source of one consumed material.
@@ -52,6 +54,7 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
 
         var lines = db.StockMovementLines
             .Include(l => l.UnitOfMeasure)
+            .Include(l => l.Batch)
             .Include(l => l.StockMovement).ThenInclude(m => m.SourceLocation)
             .Include(l => l.StockMovement).ThenInclude(m => m.DestinationLocation)
             .Where(l => l.ProductId == productId && l.StockMovement.Status == MovementStatus.Confirmed);
@@ -66,6 +69,11 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
         if (query.MovementType is not null)
         {
             lines = lines.Where(l => l.StockMovement.MovementType == query.MovementType);
+        }
+
+        if (query.BatchId is not null)
+        {
+            lines = lines.Where(l => l.BatchId == query.BatchId);
         }
 
         if (query.From is not null)
@@ -104,6 +112,8 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
                 movement.MovementType,
                 FlowOf(movement, query.LocationId),
                 movement.ConfirmedAt!.Value,
+                line.BatchId,
+                line.Batch?.Number,
                 line.Quantity,
                 line.UnitOfMeasure.Code,
                 movement.SourceLocationId,
@@ -135,11 +145,13 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
                         .Include(o => o.OutputLocation)
                         .Include(o => o.Materials).ThenInclude(m => m.ComponentProduct)
                         .Include(o => o.Materials).ThenInclude(m => m.UnitOfMeasure)
+                        .Include(o => o.Materials).ThenInclude(m => m.Batch)
+                        .Include(o => o.OutputBatch)
                         .FirstOrDefaultAsync(o => o.Id == productionOrderId, cancellationToken)
                     ?? throw new ProductionOrderNotFoundException(productionOrderId);
 
         var posted = await db.StockMovements
-            .Include(m => m.Lines)
+            .Include(m => m.Lines).ThenInclude(l => l.Batch)
             .Where(m => m.ProductionOrderId == order.Id && m.Status == MovementStatus.Confirmed)
             .ToListAsync(cancellationToken);
 
@@ -150,12 +162,14 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
 
         foreach (var material in order.Materials.OrderBy(m => m.ComponentProduct.Sku))
         {
-            var sources = await SourcesOfAsync(order, material.ComponentProductId, consumption, cancellationToken);
+            var sources = await SourcesOfAsync(order, material, consumption, cancellationToken);
 
             materials.Add(new ConsumedMaterial(
                 material.ComponentProductId,
                 material.ComponentProduct.Sku,
                 material.ComponentProduct.Name,
+                material.BatchId,
+                material.Batch?.Number,
                 material.RequiredQuantity,
                 material.ConsumedQuantity,
                 material.UnitOfMeasure.Code,
@@ -194,6 +208,8 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
                     output.Id,
                     output.Number,
                     output.ConfirmedAt!.Value,
+                    order.OutputBatchId,
+                    order.OutputBatch?.Number,
                     output.Lines.Where(l => l.ProductId == order.ProductId).Sum(l => l.Quantity),
                     order.OutputLocationId,
                     order.OutputLocation.Code,
@@ -285,22 +301,113 @@ public class TraceabilityService(IFlowStockDbContext db) : ITraceabilityService
     }
 
     /// <summary>
+    /// Everything one lot can answer for (docs/PLAN.md, sections 19 and 20): what it is, where it
+    /// came from, where it is now, every movement that touched it, and the runs it ended up in.
+    ///
+    /// With a lot in hand the chain is exact rather than inferred: the movements name the batch,
+    /// so "where was this material used" has a real answer.
+    /// </summary>
+    public async Task<BatchTraceResponse> BatchTraceAsync(Guid batchId, CancellationToken cancellationToken)
+    {
+        var batch = await db.Batches
+                        .Include(b => b.Product).ThenInclude(p => p.UnitOfMeasure)
+                        .FirstOrDefaultAsync(b => b.Id == batchId, cancellationToken)
+                    ?? throw new BatchNotFoundException(batchId);
+
+        var balances = await db.Stocks
+            .Include(s => s.Location).ThenInclude(l => l.Warehouse)
+            .Where(s => s.BatchId == batchId && s.Quantity > 0)
+            .OrderBy(s => s.Location.Warehouse.Code).ThenBy(s => s.Location.Code)
+            .ToListAsync(cancellationToken);
+
+        // The whole history of the lot: it is one lot of one product, so a page is the lot's life.
+        var history = await ProductHistoryAsync(
+            batch.ProductId,
+            new ProductHistoryQuery { BatchId = batchId, PageSize = PagedQuery.MaxPageSize, Sort = "occurredAt" },
+            cancellationToken);
+
+        var consumers = await db.ProductionOrders
+            .Include(o => o.Product)
+            .Include(o => o.OutputBatch)
+            .Include(o => o.Materials)
+            .Where(o => o.Materials.Any(m => m.BatchId == batchId))
+            .OrderByDescending(o => o.ActualStartAt)
+            .ToListAsync(cancellationToken);
+
+        var consumedAt = history.Items
+            .Where(entry => entry.MovementType == MovementType.Consumption)
+            .ToDictionary(entry => entry.ProductionOrderId!.Value, entry => (DateTime?)entry.OccurredAt);
+
+        var producedBy = batch.ProductionOrderId is { } producerId
+            ? await db.ProductionOrders
+                .Where(o => o.Id == producerId)
+                .Select(o => o.Number)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var users = await ResolveUsersAsync([batch.CreatedBy], cancellationToken);
+
+        return new BatchTraceResponse(
+            batch.Id,
+            batch.Number,
+            batch.ProductId,
+            batch.Product.Sku,
+            batch.Product.Name,
+            batch.Product.UnitOfMeasure.Code,
+            batch.Supplier,
+            batch.ProductionDate,
+            batch.ExpiryDate,
+            batch.IsExpiredOn(DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime)),
+            batch.ProductionOrderId,
+            producedBy,
+            balances.Sum(s => s.Quantity),
+            balances.Select(s => new BatchLocation(
+                s.LocationId,
+                s.Location.Code,
+                s.Location.WarehouseId,
+                s.Location.Warehouse.Code,
+                s.Quantity,
+                s.ReservedQuantity)).ToList(),
+            history.Items,
+            consumers.Select(order => new BatchConsumer(
+                order.Id,
+                order.Number,
+                order.Status,
+                order.Materials.Single(m => m.BatchId == batchId).ConsumedQuantity,
+                consumedAt.GetValueOrDefault(order.Id),
+                order.ProductId,
+                order.Product.Sku,
+                order.Product.Name,
+                order.ProducedQuantity,
+                order.OutputBatchId,
+                order.OutputBatch?.Number)).ToList(),
+            batch.CreatedAt,
+            users.Of(batch.CreatedBy));
+    }
+
+    /// <summary>
     /// The confirmed movements that brought a material into the production location before the run
-    /// took it. Without batches these are candidates, not certainties — see <see cref="MaterialSource"/>.
+    /// took it.
+    ///
+    /// For a batch-tracked material these are the movements of that exact lot, so they are the
+    /// answer, not a guess. For an untracked one the stock in a location is fungible and they stay
+    /// candidates — see <see cref="MaterialSource"/>.
     /// </summary>
     private async Task<IReadOnlyList<MaterialSource>> SourcesOfAsync(
         ProductionOrder order,
-        Guid componentProductId,
+        ProductionOrderMaterial material,
         StockMovement? consumption,
         CancellationToken cancellationToken)
     {
+        var componentProductId = material.ComponentProductId;
         var cutoff = consumption?.ConfirmedAt;
 
         var inbound = db.StockMovements
             .Include(m => m.SourceLocation)
             .Where(m => m.Status == MovementStatus.Confirmed
                         && m.DestinationLocationId == order.ProductionLocationId
-                        && m.Lines.Any(l => l.ProductId == componentProductId));
+                        && m.Lines.Any(l => l.ProductId == componentProductId
+                                            && (material.BatchId == null || l.BatchId == material.BatchId)));
 
         if (consumption is { } posted)
         {

@@ -36,6 +36,8 @@ public record ProductHistoryEntry(
     MovementType MovementType,
     StockFlow Flow,
     DateTime OccurredAt,
+    Guid? BatchId,
+    string? BatchNumber,
     decimal Quantity,
     string UnitOfMeasureCode,
     Guid? SourceLocationId,
@@ -48,12 +50,11 @@ public record ProductHistoryEntry(
     TraceUser PerformedBy);
 
 /// <summary>
-/// One movement that could have supplied a material to the place it was consumed from.
+/// One movement that brought a material to the place it was consumed from.
 ///
-/// Could have, not did: without batch tracking (Phase 8) stock in a location is fungible, so the
-/// system can name the deliveries that fed that location before the run, not the exact kilograms
-/// that went into it. Section 19 asks for the source movements "where batch tracking is
-/// implemented"; this is the honest answer until then.
+/// For a batch-tracked material these are the movements of that exact lot, which is the answer
+/// section 19 asks for. For a product without batch tracking the stock in a location is fungible,
+/// so these are the deliveries that could have supplied it — candidates, not certainties.
 /// </summary>
 public record MaterialSource(
     Guid MovementId,
@@ -71,6 +72,8 @@ public record ConsumedMaterial(
     Guid ComponentProductId,
     string ComponentSku,
     string ComponentName,
+    Guid? BatchId,
+    string? BatchNumber,
     decimal RequiredQuantity,
     decimal ConsumedQuantity,
     string UnitOfMeasureCode,
@@ -85,6 +88,8 @@ public record ProductionOutput(
     Guid MovementId,
     string MovementNumber,
     DateTime OccurredAt,
+    Guid? BatchId,
+    string? BatchNumber,
     decimal Quantity,
     Guid LocationId,
     string LocationCode,
@@ -139,6 +144,56 @@ public record MaterialUsageEntry(
     DateTime? CompletedAt,
     TraceUser PerformedBy);
 
+/// <summary>Where one lot of goods is now: a balance of that lot in one location.</summary>
+public record BatchLocation(
+    Guid LocationId,
+    string LocationCode,
+    Guid WarehouseId,
+    string WarehouseCode,
+    decimal Quantity,
+    decimal ReservedQuantity);
+
+/// <summary>
+/// One production run that consumed a lot, and the goods that run made — the "Flour batch #123 →
+/// Production Order #10042" of docs/PLAN.md, section 19.
+/// </summary>
+public record BatchConsumer(
+    Guid ProductionOrderId,
+    string Number,
+    ProductionOrderStatus Status,
+    decimal ConsumedQuantity,
+    DateTime? ConsumedAt,
+    Guid ProducedProductId,
+    string ProducedSku,
+    string ProducedProductName,
+    decimal ProducedQuantity,
+    Guid? ProducedBatchId,
+    string? ProducedBatchNumber);
+
+/// <summary>
+/// Everything one lot can answer for: what it is, where it came from, where it is now, everything
+/// that moved it, and which runs it ended up in (docs/PLAN.md, sections 19 and 20).
+/// </summary>
+public record BatchTraceResponse(
+    Guid BatchId,
+    string Number,
+    Guid ProductId,
+    string Sku,
+    string ProductName,
+    string UnitOfMeasureCode,
+    string? Supplier,
+    DateOnly? ProductionDate,
+    DateOnly? ExpiryDate,
+    bool IsExpired,
+    Guid? ProducedByProductionOrderId,
+    string? ProducedByProductionOrderNumber,
+    decimal QuantityOnHand,
+    IReadOnlyList<BatchLocation> Locations,
+    IReadOnlyList<ProductHistoryEntry> History,
+    IReadOnlyList<BatchConsumer> ConsumedBy,
+    DateTime CreatedAt,
+    TraceUser CreatedBy);
+
 /// <summary>Filters for GET /api/traceability/products/{productId}/history.</summary>
 public class ProductHistoryQuery : PagedQuery
 {
@@ -146,6 +201,9 @@ public class ProductHistoryQuery : PagedQuery
     public Guid? LocationId { get; set; }
 
     public MovementType? MovementType { get; set; }
+
+    /// <summary>Only movements of one lot.</summary>
+    public Guid? BatchId { get; set; }
 
     /// <summary>Inclusive lower bound on when the movement was confirmed, UTC.</summary>
     public DateTime? From { get; set; }
