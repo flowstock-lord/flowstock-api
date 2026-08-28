@@ -11,7 +11,7 @@ Core principle:
 > Stock never changes silently. Every stock change is represented by a stock movement or a
 > production operation.
 
-**Status: Phase 9 (reporting) — done. Next: Phase 10 — notifications.**
+**Status: Phase 10 (notifications) — done. Next: Phase 11 — inventory intelligence.**
 
 ## Stack
 
@@ -92,6 +92,7 @@ Log in via `POST /api/auth/login`, then paste the token into Swagger's **Authori
 | Batches | `/api/batches` (filters `?productId=`, `?expiringBefore=`, `?isExpired=`) | read: any authenticated, write: Admin or WarehouseManager |
 | Traceability | `/api/traceability/products/{id}/history`, `/products/{id}/usage`, `/production-orders/{id}`, `/batches/{id}` | any authenticated (read-only) |
 | Reports | `/api/reports/current-stock`, `/stock-by-warehouse`, `/movement-history`, `/production-history`, `/material-consumption`, `/finished-goods`, `/adjustments` | any authenticated (read-only) |
+| Notifications | `/api/notifications`, `/{id}/read`, `/{id}/unread`, `/scan` | read: any authenticated, scan: Admin |
 
 Collections accept `page`, `pageSize` and filters, plus `sort` where noted in Swagger
 (`-` prefix for descending). Nothing is hard-deleted — everything is deactivated instead.
@@ -116,6 +117,11 @@ Batch tracking is opt-in per product. For a tracked product every movement line 
 moves and stock is kept lot by lot, so a delivery can be followed to the production run that
 consumed it and on to the goods that run made. The warehouse always names the lot; the system
 never picks one on its behalf.
+
+Notifications are raised by the operations themselves — a confirmed transfer, a completed run —
+inside the transaction that did the work, and by a periodic scan for the conditions no operation
+causes: lots past their expiry date that still hold stock, and draft production orders the shop
+floor cannot feed. Each event is recorded once, however often the scan runs.
 
 The reports are queries over that same history — current stock, stock by warehouse, the movement
 journal, production runs and their yield, what production consumed and produced, and every count

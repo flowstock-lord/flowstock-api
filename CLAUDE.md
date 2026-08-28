@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 9 — done. Phase 10 (notifications) is next.**
+**Phase 10 — done. Phase 11 (inventory intelligence) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -106,7 +106,8 @@ abstractions declared in `Application`/`Domain`.
   `LOCATION_INACTIVE`, `MOVEMENT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `INVALID_MOVEMENT`,
   `MOVEMENT_ALREADY_CONFIRMED`, `MOVEMENT_ALREADY_CANCELLED`, `BOM_NOT_FOUND`, `BOM_INVALID`,
   `PRODUCTION_ORDER_NOT_FOUND`, `PRODUCTION_ORDER_INVALID`, `PRODUCTION_ORDER_ALREADY_COMPLETED`,
-  `BATCH_NOT_FOUND`, `BATCH_NUMBER_EXISTS`, `BATCH_REQUIRED`, `BATCH_NOT_ALLOWED`, `BATCH_INVALID`.
+  `BATCH_NOT_FOUND`, `BATCH_NUMBER_EXISTS`, `BATCH_REQUIRED`, `BATCH_NOT_ALLOWED`, `BATCH_INVALID`,
+  `NOTIFICATION_NOT_FOUND`.
   Add new codes rather than reusing an ill-fitting one; never rename an existing code silently.
 - Enums cross the wire by name (`JsonStringEnumConverter`), never as numbers.
 - Model binding failures (malformed body, bad query type) go through `ModelBindingErrors` so they
@@ -346,3 +347,31 @@ live in `appsettings.Development.json`.
 - Nothing here is BI. No cubes, no materialized aggregates, no scheduled snapshots: every report is
   a query over the transaction history, and if a report ever disagrees with the history, the report
   is wrong.
+
+## Notifications (Phase 10)
+
+- `Notification` lives in `src/FlowStock.Domain/Notifications/`; `NotificationService` raises,
+  lists and scans. Raising one changes no stock — a notification is a record of something that
+  happened or was noticed, never a thing that happens.
+- Two sources, deliberately. An **operation** raises its own as it happens — `TransferReceived`
+  when a transfer is confirmed, `ProductionCompleted` when a run delivers — **inside the
+  transaction that did the work**, so an operation that rolls back tells nobody anything. A
+  **condition** that no single operation causes is found by `ScanAsync`: expired lots that still
+  hold stock, and draft runs the shop floor cannot feed.
+- `EventKey` is unique (`ExpiredBatch:{batchId}`), which is what makes raising idempotent: a scan
+  every quarter of an hour, or two API instances scanning at once, records one event once.
+- The scan runs both ways: `NotificationScanService` (a `BackgroundService` with a
+  `PeriodicTimer`, configured under `Notifications:Scan`, disabled in tests) and
+  `POST /api/notifications/scan` for `Policies.Admin`. Same code, so the tests exercise what
+  production runs. No broker and no scheduler — the plan asks for exactly that until there is a
+  real requirement.
+- A **planned** production order is never reported as short: planning reserved exactly what it
+  needs, and availability already reflects that. Only drafts are checked.
+- `LowStock` is in the enum but is never raised: there is nothing to compare a balance against
+  until reorder points arrive in Phase 11. That was a deliberate call — a threshold invented here
+  would be the wrong one.
+- Notifications belong to the team, not to a person: no per-user inboxes in this phase, so reading
+  one records who read it and when, for everybody. Reading and marking read are open to any
+  authenticated user.
+- Serilog is configured with `writeToProviders: true` so integration tests can capture what the API
+  logged when a request fails; nothing else registers a provider in production.

@@ -1,7 +1,9 @@
 using FlowStock.Application.Common;
 using FlowStock.Application.Inventory;
+using FlowStock.Application.Notifications;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Notifications;
 using FlowStock.Domain.Production;
 using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +50,7 @@ public interface IProductionOrderService
 public class ProductionOrderService(
     IFlowStockDbContext db,
     IStockMovementService stockMovements,
+    INotificationRaiser notifications,
     ICurrentUser currentUser,
     TimeProvider timeProvider,
     ILogger<ProductionOrderService> logger) : IProductionOrderService
@@ -330,6 +333,25 @@ public class ProductionOrderService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        await notifications.RaiseAsync(
+            new Notification
+            {
+                Type = NotificationType.ProductionCompleted,
+                EventKey = Notification.KeyFor(NotificationType.ProductionCompleted, order.Id),
+                Message =
+                    $"Production order {order.Number} produced {producedQuantity} " +
+                    $"{order.Product.UnitOfMeasure.Code} of {order.Product.Sku} into " +
+                    $"{order.OutputLocation.Code}.",
+                OccurredAt = order.CompletedAt!.Value,
+                ProductId = order.ProductId,
+                BatchId = order.OutputBatchId,
+                LocationId = order.OutputLocationId,
+                ProductionOrderId = order.Id,
+                StockMovementId = output.Id
+            },
+            cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         logger.LogInformation(

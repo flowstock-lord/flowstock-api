@@ -27,6 +27,7 @@ public class ReportingServiceTests
         _orders = new ProductionOrderService(
             _fixture.Db,
             _fixture.Movements,
+            _fixture.Notifications,
             _fixture.CurrentUser,
             TimeProvider.System,
             NullLogger<ProductionOrderService>.Instance);

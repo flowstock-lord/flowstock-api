@@ -152,8 +152,15 @@ public class InventoryEndpointTests(FlowStockApiFactory factory)
         var responses = await Task.WhenAll(drafts.Select((draft, i) =>
             clients[i].PostAsync($"/api/stock-movements/{draft.Id}/confirm", null)));
 
-        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
-        Assert.Equal(contenders - 1, responses.Count(r => r.StatusCode == HttpStatusCode.BadRequest));
+        // Named so a failure says what actually came back, and what the API logged: a concurrency
+        // test that fails with "expected 3, got 1" tells nobody why the losers did not get a 400.
+        var outcome = string.Join(", ", await Task.WhenAll(responses.Select(async r =>
+            $"{(int)r.StatusCode} {await r.Content.ReadAsStringAsync()}")))
+            + Environment.NewLine + Environment.NewLine + "API errors:" + Environment.NewLine
+            + factory.Errors.Report();
+
+        Assert.True(responses.Count(r => r.StatusCode == HttpStatusCode.OK) == 1, outcome);
+        Assert.True(responses.Count(r => r.StatusCode == HttpStatusCode.BadRequest) == contenders - 1, outcome);
 
         foreach (var rejected in responses.Where(r => r.StatusCode == HttpStatusCode.BadRequest))
         {

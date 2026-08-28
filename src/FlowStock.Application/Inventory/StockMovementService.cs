@@ -1,6 +1,8 @@
 using FlowStock.Application.Common;
+using FlowStock.Application.Notifications;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Notifications;
 using FlowStock.Domain.Warehouses;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -47,6 +49,7 @@ public interface IStockMovementService
 /// </summary>
 public class StockMovementService(
     IFlowStockDbContext db,
+    INotificationRaiser notifications,
     ICurrentUser currentUser,
     TimeProvider timeProvider,
     ILogger<StockMovementService> logger) : IStockMovementService
@@ -185,6 +188,26 @@ public class StockMovementService(
         movement.ConfirmedBy = currentUser.UserId;
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // Raised inside the transaction: a confirmation that rolls back tells nobody anything
+        // (docs/PLAN.md, section 31).
+        if (movement.MovementType == MovementType.Transfer)
+        {
+            await notifications.RaiseAsync(
+                new Notification
+                {
+                    Type = NotificationType.TransferReceived,
+                    EventKey = Notification.KeyFor(NotificationType.TransferReceived, movement.Id),
+                    Message =
+                        $"Transfer {movement.Number} arrived at {movement.DestinationLocation!.Code} " +
+                        $"with {movement.Lines.Count} line(s).",
+                    OccurredAt = movement.ConfirmedAt.Value,
+                    LocationId = movement.DestinationLocationId,
+                    StockMovementId = movement.Id
+                },
+                cancellationToken);
+        }
+
         await transaction.CommitAsync(cancellationToken);
 
         logger.LogInformation(

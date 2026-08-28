@@ -2,6 +2,7 @@ using System.Reflection;
 using FlowStock.Application.Authentication;
 using FlowStock.Application.Catalog;
 using FlowStock.Application.Inventory;
+using FlowStock.Application.Notifications;
 using FlowStock.Application.Production;
 using FlowStock.Application.Reporting;
 using FlowStock.Application.Traceability;
@@ -31,6 +32,9 @@ public static class DependencyInjection
         services.AddScoped<IProductionOrderService, ProductionOrderService>();
         services.AddScoped<ITraceabilityService, TraceabilityService>();
         services.AddScoped<IReportingService, ReportingService>();
+        services.AddScoped<NotificationService>();
+        services.AddScoped<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
+        services.AddScoped<INotificationRaiser>(sp => sp.GetRequiredService<NotificationService>());
 
         return services;
     }

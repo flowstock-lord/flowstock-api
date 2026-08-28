@@ -1,5 +1,6 @@
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Notifications;
 using FlowStock.Domain.Production;
 using FlowStock.Domain.Users;
 using FlowStock.Domain.Warehouses;
@@ -42,6 +43,8 @@ public interface IFlowStockDbContext
     DbSet<ProductionOrder> ProductionOrders { get; }
 
     DbSet<ProductionOrderMaterial> ProductionOrderMaterials { get; }
+
+    DbSet<Notification> Notifications { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

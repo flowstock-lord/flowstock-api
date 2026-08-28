@@ -1,5 +1,6 @@
 using FlowStock.Application.Common;
 using FlowStock.Application.Inventory;
+using FlowStock.Application.Notifications;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Inventory;
 using FlowStock.Domain.Warehouses;
@@ -79,7 +80,11 @@ public class InventoryFixture
     public ICurrentUser CurrentUser => new TestCurrentUser(UserId);
 
     public StockMovementService Movements => new(
-        Db, CurrentUser, TimeProvider.System, NullLogger<StockMovementService>.Instance);
+        Db, Notifications, CurrentUser, TimeProvider.System, NullLogger<StockMovementService>.Instance);
+
+    /// <summary>The real notification service: operations raise notifications for real in tests too.</summary>
+    public NotificationService Notifications => new(
+        Db, CurrentUser, TimeProvider.System, NullLogger<NotificationService>.Instance);
 
     public StockService StockReader => new(Db);
 

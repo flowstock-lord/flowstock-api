@@ -2,6 +2,7 @@ using FlowStock.Application.Common;
 using FlowStock.Domain.Catalog;
 using FlowStock.Domain.Common;
 using FlowStock.Domain.Inventory;
+using FlowStock.Domain.Notifications;
 using FlowStock.Domain.Production;
 using FlowStock.Domain.Users;
 using FlowStock.Domain.Warehouses;
@@ -60,6 +61,8 @@ public class FlowStockDbContext(
     public DbSet<ProductionOrder> ProductionOrders => Set<ProductionOrder>();
 
     public DbSet<ProductionOrderMaterial> ProductionOrderMaterials => Set<ProductionOrderMaterial>();
+
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
 
 namespace FlowStock.IntegrationTests.Infrastructure;
@@ -28,12 +29,21 @@ public class FlowStockApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
     public const string ViewerEmail = "viewer@flowstock.local";
     public const string ViewerPassword = "Viewer123!";
 
+    /// <summary>What the API logged as an error, for tests that get an unexpected 500.</summary>
+    public CapturedErrors Errors { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(Errors)));
+
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:FlowStockDb", _postgres.GetConnectionString());
         builder.UseSetting("Database:MigrateOnStartup", "true");
         builder.UseSetting("Jwt:Key", "integration-test-signing-key-at-least-32-chars");
+
+        // The notification scan runs on a timer in production. Tests run it deliberately, so a
+        // background tick can never race an assertion about what has been raised.
+        builder.UseSetting("Notifications:Scan:Enabled", "false");
     }
 
     // Explicit implementation: xUnit's IAsyncLifetime returns Task, WebApplicationFactory's

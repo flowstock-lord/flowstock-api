@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using FlowStock.Api;
 using FlowStock.Api.Authorization;
+using FlowStock.Api.BackgroundJobs;
 using FlowStock.Api.Middleware;
 using FlowStock.Application;
 using FlowStock.Application.Common;
@@ -25,10 +26,12 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // writeToProviders keeps any other registered logging provider in the loop. There are none in
+    // production; it is what lets an integration test see what the API logged when a request fails.
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
+        .Enrich.FromLogContext(), writeToProviders: true);
 
     builder.Services
         .AddControllers(options => options.Filters.Add<ValidationFilter>())
@@ -93,6 +96,10 @@ try
         });
 
     builder.Services.AddAuthorizationBuilder().AddFlowStockPolicies();
+
+    // Expired lots and unfeedable runs are conditions of time and stock, so something has to look
+    // for them. Turned off in tests, which run the same scan deliberately.
+    builder.Services.AddHostedService<NotificationScanService>();
 
     builder.Services.AddHealthChecks()
         .AddNpgSql(
