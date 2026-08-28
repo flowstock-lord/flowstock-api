@@ -14,7 +14,7 @@ alternative way to change stock.
 
 ## Current phase
 
-**Phase 8 — done. Phase 9 (reporting) is next.**
+**Phase 9 — done. Phase 10 (notifications) is next.**
 
 Keep this line current. Update it when a phase reaches its Definition of Done in
 [docs/PLAN.md](docs/PLAN.md) (section 33). Do not implement work from a later phase before the
@@ -320,3 +320,29 @@ live in `appsettings.Development.json`.
   is exact, so `MaterialSource` stops being a list of candidates for tracked products.
 - Reading lots is open to any authenticated user; registering one needs `Policies.Warehouse` —
   a lot appears when goods arrive, which is a warehouse operation, not catalogue maintenance.
+
+## Reporting (Phase 9)
+
+- `ReportingService` lives in `src/FlowStock.Application/Reporting/` and owns no entities and no
+  schema: Phase 9 adds no table and no migration. Seven reports (docs/PLAN.md, section 30) under
+  `/api/reports`, all `Policies.AnyAuthenticated`, all read-only — `current-stock`,
+  `stock-by-warehouse`, `movement-history`, `production-history`, `material-consumption`,
+  `finished-goods`, `adjustments`.
+- **Never sum across units.** Every total is grouped by product, and a product has exactly one unit
+  of measure, so kilograms and pieces can never land in the same number. There is deliberately no
+  "total stock" figure for a warehouse.
+- **Only confirmed movements count**, as everywhere else. The totals are built from movements, not
+  from what an order planned to take: `material-consumption` reports what actually left the shelf.
+- A totalled report filters and sorts **on the grouping**, before the rows are projected — `HAVING`
+  and `ORDER BY` over an aggregate. Neither provider can filter or sort over a record the query has
+  already projected, and grouping keys must be anonymous types: a `GroupBy` into a named record's
+  constructor does not translate to SQL (it passes on the in-memory provider and fails on
+  PostgreSQL, so it is worth knowing before writing the next report).
+- `current-stock` reads balances, not the catalogue: a product nothing ever touched has no row at
+  all, and `onlyInStock=false` shows balances that have fallen to zero rather than the whole
+  catalogue.
+- `production-history` reports `yieldPercent` only for a completed run — before that it would read
+  0% and mean nothing.
+- Nothing here is BI. No cubes, no materialized aggregates, no scheduled snapshots: every report is
+  a query over the transaction history, and if a report ever disagrees with the history, the report
+  is wrong.
